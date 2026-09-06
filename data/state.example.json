@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "groups": [
+    {
+      "id": "grp-netflix-family",
+      "chatId": "-1001234567890",
+      "title": "Nhóm Netflix & Spotify Family",
+      "alertChatId": "",
+      "active": true,
+      "createdAt": "2026-09-01T00:00:00.000Z",
+      "updatedAt": "2026-09-01T00:00:00.000Z"
+    }
+  ],
+  "services": [
+    {
+      "id": "svc-netflix",
+      "groupId": "grp-netflix-family",
+      "name": "Netflix Premium 4K",
+      "description": "Gói Netflix 4 màn hình Ultra HD hàng tháng",
+      "reminderDay": 5,
+      "reminderTime": "08:00",
+      "mode": "per_member",
+      "totalAmount": 260000,
+      "defaultAmountPerMember": 65000,
+      "transferPrefix": "NET",
+      "bankInfo": {
+        "bankCode": "MB",
+        "accountNumber": "0388888888",
+        "accountName": "NGUYEN VAN ADMIN"
+      },
+      "messageTemplate": "🔔 [THÔNG BÁO ĐÓNG TIỀN NETFLIX THÁNG {month}]\n\nXin chào mọi người trong {groupName}!\nĐến hạn đóng tiền dịch vụ {serviceName}.\n\n💰 Tổng số tiền: {totalAmount}đ\n📌 Danh sách thành viên:\n{memberList}\n\n💳 Thông tin thanh toán:\n- Ngân hàng: {bankName} ({bankCode})\n- Số tài khoản: `{accountNumber}`\n- Chủ tài khoản: {accountName}\n\n👉 Vui lòng quét mã VietQR bên dưới hoặc chuyển khoản đúng cú pháp để hệ thống tự động ghi nhận nhé!",
+      "active": true,
+      "createdAt": "2026-09-01T00:00:00.000Z",
+      "updatedAt": "2026-09-01T00:00:00.000Z"
+    }
+  ],
+  "members": {
+    "svc-netflix": [
+      {
+        "id": "mem-an",
+        "name": "Hoàng An",
+        "telegramUsername": "hoangan99",
+        "transferCode": "NET-AN",
+        "customAmount": 65000,
+        "active": true,
+        "createdAt": "2026-09-01T00:00:00.000Z"
+      },
+      {
+        "id": "mem-binh",
+        "name": "Thanh Bình",
+        "telegramUsername": "binhtran",
+        "transferCode": "NET-BINH",
+        "customAmount": 65000,
+        "active": true,
+        "createdAt": "2026-09-01T00:00:00.000Z"
+      },
+      {
+        "id": "mem-chi",
+        "name": "Khánh Chi",
+        "telegramUsername": "chichi",
+        "transferCode": "NET-CHI",
+        "customAmount": 65000,
+        "active": true,
+        "createdAt": "2026-09-01T00:00:00.000Z"
+      },
+      {
+        "id": "mem-dung",
+        "name": "Tiến Dũng",
+        "telegramUsername": "dungtien",
+        "transferCode": "NET-DUNG",
+        "customAmount": 65000,
+        "active": true,
+        "createdAt": "2026-09-01T00:00:00.000Z"
+      }
+    ]
+  },
+  "transactions": [],
+  "reminderReceipts": [],
+  "monthlyPayments": [],
+  "updatedAt": "2026-09-01T00:00:00.000Z"
+}

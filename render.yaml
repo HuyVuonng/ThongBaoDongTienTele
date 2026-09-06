@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: telegram-subscription-bot
+    env: docker
+    plan: starter
+    region: singapore
+    disk:
+      name: bot-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: DATA_PATH
+        value: /var/data/state.json
+      - key: TZ
+        value: Asia/Ho_Chi_Minh
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_ADMIN_ID
+        sync: false
+      - key: SEPAY_WEBHOOK_SECRET
+        sync: false
+      - key: PUBLIC_URL
+        sync: false
