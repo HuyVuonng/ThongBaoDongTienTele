@@ -162,15 +162,31 @@ apiRouter.post('/groups', async (req: Request, res: Response): Promise<void> => 
   try {
     const userId = getAuthUserId(req);
     const validated = GroupSchema.parse(req.body);
+    
+    // Chuẩn hóa alertChatId / alertUsername
+    let alertChatId = validated.alertChatId?.trim();
+    let alertUsername = validated.alertUsername?.replace(/^@/, '').trim();
+
+    if (alertChatId && (alertChatId.startsWith('@') || /[a-zA-Z_]/.test(alertChatId))) {
+      if (!alertUsername) alertUsername = alertChatId.replace(/^@/, '').trim();
+      alertChatId = undefined;
+    }
+
     const newGroup: Group = {
       id: `grp_${Date.now()}`,
       userId,
       ...validated,
+      alertChatId,
+      alertUsername,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
 
     await store.update(s => {
+      // Nếu có alertUsername mà chưa có alertChatId, thử tra cứu
+      if (newGroup.alertUsername && !newGroup.alertChatId && s.usernameMappings) {
+        newGroup.alertChatId = s.usernameMappings[newGroup.alertUsername.toLowerCase()];
+      }
       s.groups.push(newGroup);
     });
 
@@ -187,6 +203,14 @@ apiRouter.put('/groups/:id', async (req: Request, res: Response): Promise<void> 
     const id = req.params.id as string;
     const validated = GroupSchema.parse(req.body);
 
+    let alertChatId = validated.alertChatId?.trim();
+    let alertUsername = validated.alertUsername?.replace(/^@/, '').trim();
+
+    if (alertChatId && (alertChatId.startsWith('@') || /[a-zA-Z_]/.test(alertChatId))) {
+      if (!alertUsername) alertUsername = alertChatId.replace(/^@/, '').trim();
+      alertChatId = undefined;
+    }
+
     let updated: Group | undefined;
     await store.update(s => {
       const idx = s.groups.findIndex(g => g.id === id);
@@ -195,9 +219,15 @@ apiRouter.put('/groups/:id', async (req: Request, res: Response): Promise<void> 
         throw new Error('Bạn không có quyền sửa nhóm này');
       }
 
+      if (alertUsername && !alertChatId && s.usernameMappings) {
+        alertChatId = s.usernameMappings[alertUsername.toLowerCase()];
+      }
+
       s.groups[idx] = {
         ...s.groups[idx],
         ...validated,
+        alertChatId,
+        alertUsername,
         userId: s.groups[idx].userId || userId,
         updatedAt: new Date().toISOString()
       };
@@ -253,10 +283,21 @@ apiRouter.post('/services', async (req: Request, res: Response): Promise<void> =
   try {
     const userId = getAuthUserId(req);
     const validated = ServiceSchema.parse(req.body);
+
+    let collectorChatId = validated.collectorChatId?.trim();
+    let collectorUsername = validated.collectorUsername?.replace(/^@/, '').trim();
+
+    if (collectorChatId && (collectorChatId.startsWith('@') || /[a-zA-Z_]/.test(collectorChatId))) {
+      if (!collectorUsername) collectorUsername = collectorChatId.replace(/^@/, '').trim();
+      collectorChatId = undefined;
+    }
+
     const newService: Service = {
       id: `svc_${Date.now()}`,
       userId,
       ...validated,
+      collectorChatId,
+      collectorUsername,
       mode: validated.mode || 'shared',
       totalAmount: validated.totalAmount || 0,
       createdAt: new Date().toISOString(),
@@ -264,6 +305,9 @@ apiRouter.post('/services', async (req: Request, res: Response): Promise<void> =
     };
 
     await store.update(s => {
+      if (newService.collectorUsername && !newService.collectorChatId && s.usernameMappings) {
+        newService.collectorChatId = s.usernameMappings[newService.collectorUsername.toLowerCase()];
+      }
       s.services.push(newService);
       if (!s.members[newService.id]) {
         s.members[newService.id] = [];
@@ -283,6 +327,14 @@ apiRouter.put('/services/:id', async (req: Request, res: Response): Promise<void
     const id = req.params.id as string;
     const validated = ServiceSchema.parse(req.body);
 
+    let collectorChatId = validated.collectorChatId?.trim();
+    let collectorUsername = validated.collectorUsername?.replace(/^@/, '').trim();
+
+    if (collectorChatId && (collectorChatId.startsWith('@') || /[a-zA-Z_]/.test(collectorChatId))) {
+      if (!collectorUsername) collectorUsername = collectorChatId.replace(/^@/, '').trim();
+      collectorChatId = undefined;
+    }
+
     let updated: Service | undefined;
     await store.update(s => {
       const idx = s.services.findIndex(svc => svc.id === id);
@@ -291,9 +343,15 @@ apiRouter.put('/services/:id', async (req: Request, res: Response): Promise<void
         throw new Error('Bạn không có quyền sửa dịch vụ này');
       }
 
+      if (collectorUsername && !collectorChatId && s.usernameMappings) {
+        collectorChatId = s.usernameMappings[collectorUsername.toLowerCase()];
+      }
+
       s.services[idx] = {
         ...s.services[idx],
         ...validated,
+        collectorChatId,
+        collectorUsername,
         userId: s.services[idx].userId || userId,
         mode: validated.mode || s.services[idx].mode || 'shared',
         totalAmount: validated.totalAmount !== undefined ? validated.totalAmount : s.services[idx].totalAmount,
@@ -1129,6 +1187,7 @@ apiRouter.get('/user/profile', async (req: Request, res: Response): Promise<void
         fullName: currentUser.fullName || currentUser.username,
         role: currentUser.role,
         telegramChatId: currentUser.telegramChatId || '',
+        telegramUsername: currentUser.telegramUsername || '',
         sepayAutoSync: currentUser.sepayAutoSync ?? true,
         hasSepayToken: Boolean(currentUser.sepayApiToken)
       }
@@ -1141,7 +1200,7 @@ apiRouter.get('/user/profile', async (req: Request, res: Response): Promise<void
 apiRouter.post('/user/profile', async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = getAuthUserId(req);
-    const { fullName, telegramChatId, syncToGroups } = req.body;
+    const { fullName, telegramChatId, telegramUsername, syncToGroups } = req.body;
     let updatedUser: any;
 
     await store.update(s => {
@@ -1150,29 +1209,40 @@ apiRouter.post('/user/profile', async (req: Request, res: Response): Promise<voi
       if (!u) throw new Error('Không tìm thấy tài khoản người dùng');
 
       if (fullName !== undefined) u.fullName = String(fullName).trim();
-      if (telegramChatId !== undefined) {
-        const cleanChatId = String(telegramChatId).trim();
-        u.telegramChatId = cleanChatId;
+      
+      let cleanInput = String(telegramChatId || telegramUsername || '').trim();
+      if (cleanInput) {
+        if (cleanInput.startsWith('@') || /[a-zA-Z_]/.test(cleanInput)) {
+          u.telegramUsername = cleanInput.replace(/^@/, '').trim();
+          if (s.usernameMappings && s.usernameMappings[u.telegramUsername.toLowerCase()]) {
+            u.telegramChatId = s.usernameMappings[u.telegramUsername.toLowerCase()];
+          }
+        } else {
+          u.telegramChatId = cleanInput;
+        }
 
-        // Tự động gán alertChatId cho các nhóm của user nếu nhóm chưa có hoặc nếu yêu cầu sync
+        // Tự động gán cho các nhóm của user nếu nhóm chưa có hoặc nếu yêu cầu sync
         for (const g of s.groups) {
           if (g.userId === userId && (!g.alertChatId || syncToGroups === true)) {
-            g.alertChatId = cleanChatId;
+            if (u.telegramChatId) g.alertChatId = u.telegramChatId;
+            if (u.telegramUsername) g.alertUsername = u.telegramUsername;
           }
         }
       }
+
       u.updatedAt = new Date().toISOString();
       updatedUser = u;
     });
 
     res.json({
       success: true,
-      message: 'Đã lưu cấu hình Chat ID Chủ Thu thành công!',
+      message: 'Đã lưu cấu hình thông tin Chủ Thu thành công!',
       user: {
         id: updatedUser.id,
         username: updatedUser.username,
         fullName: updatedUser.fullName,
-        telegramChatId: updatedUser.telegramChatId
+        telegramChatId: updatedUser.telegramChatId,
+        telegramUsername: updatedUser.telegramUsername
       }
     });
   } catch (error: any) {

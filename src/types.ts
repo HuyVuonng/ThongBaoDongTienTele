@@ -8,6 +8,7 @@ export interface User {
   fullName?: string;        // Tên hiển thị (Họ tên)
   role: 'admin' | 'user';
   telegramChatId?: string;  // Chat ID Telegram cá nhân để nhận thông báo duyệt tiền
+  telegramUsername?: string; // Telegram Username (không có @)
   sepayApiToken?: string;   // Token SePay riêng của người dùng
   sepayAutoSync?: boolean;  // Bật/tắt tự động đồng bộ SePay của người dùng
   createdAt: string;
@@ -58,6 +59,7 @@ export interface Service {
   defaultAmountPerMember?: number; // Số tiền mặc định mỗi người (nếu chia đều)
   transferPrefix?: string; // Tiền tố nội dung CK (VD: NET, SP, YT, ANUONG)
   collectorChatId?: string; // Telegram Chat ID của Người Thu Tiền / Duyệt Tiền riêng cho dịch vụ này
+  collectorUsername?: string; // Telegram Username của Người Thu Tiền (VD: huyvuong)
   bankInfo: BankAccountInfo;
   messageTemplate: string; // Mẫu tin nhắn nhắc kèm placeholder
   active: boolean;
@@ -108,6 +110,7 @@ export interface Group {
   title: string;          // Tên nhóm
   threadId?: number;      // Topic ID (nếu là nhóm có Topics)
   alertChatId?: string;   // Chat ID nhận cảnh báo giao dịch chưa khớp (mặc định chat chung hoặc admin)
+  alertUsername?: string; // Telegram Username nhận cảnh báo duyệt tiền (VD: huyvuong)
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -174,6 +177,7 @@ export interface AppState {
   reminderReceipts: ReminderReceipt[];
   monthlyPayments: MonthlyMemberPayment[];
   expenseBatches?: ExpenseBatch[]; // Các đợt thu tiền phát sinh
+  usernameMappings?: Record<string, string>; // Mapping username -> chatId (lowercase)
   adminPasswordHash?: string; // Băm mật khẩu admin mặc định
   sepayApiToken?: string;     // SePay User API Token
   sepayAutoSync?: boolean;    // Tự động đồng bộ giao dịch từ SePay định kỳ
@@ -220,6 +224,7 @@ export const ServiceSchema = z.object({
   defaultAmountPerMember: z.number().nonnegative().optional(),
   transferPrefix: z.string().default('').optional(),
   collectorChatId: z.string().optional(),
+  collectorUsername: z.string().optional(),
   bankInfo: BankAccountInfoSchema,
   messageTemplate: z.string().min(1, 'Mẫu tin nhắn không được để trống'),
   active: z.boolean().default(true)
@@ -231,6 +236,7 @@ export const GroupSchema = z.object({
   title: z.string().min(1, 'Tên nhóm không được để trống'),
   threadId: z.number().int().optional(),
   alertChatId: z.string().optional(),
+  alertUsername: z.string().optional(),
   active: z.boolean().default(true)
 });
 

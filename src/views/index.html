@@ -777,37 +777,37 @@
               </div>
             </div>
 
-            <!-- CARD 2: CẤU HÌNH CHỦ THU (TELEGRAM CHAT ID ĐỂ DUYỆT TIỀN) -->
+            <!-- CARD 2: CẤU HÌNH CHỦ THU (TELEGRAM CHAT ID / USERNAME ĐỂ DUYỆT TIỀN) -->
             <div class="glass-panel p-4" style="border-left: 4px solid var(--accent-primary);">
               <div class="section-heading">
                 <div class="heading-left">
                   <i data-lucide="user-check" class="text-primary"></i>
                   <div>
-                    <h3>Cấu Hình Chat ID Chủ Thu (Trưởng Nhóm)</h3>
-                    <p class="section-desc">Nhận tin nhắn riêng kèm nút <strong>[ ✅ Đã Nhận Tiền ]</strong> và <strong>[ ❌ Chưa Thấy Tiền ]</strong> khi thành viên báo chuyển khoản.</p>
+                    <h3>Cấu Hình Người Thu Tiền / Trưởng Nhóm</h3>
+                    <p class="section-desc">Nhận thông báo duyệt riêng hoặc được tag trực tiếp trong nhóm kèm nút <strong>[ ✅ Đã Nhận Tiền ]</strong> và <strong>[ ❌ Chưa Thấy Tiền ]</strong>.</p>
                   </div>
                 </div>
               </div>
 
               <form id="ownerTelegramForm" class="mt-4" onsubmit="handleSaveOwnerTelegramConfig(event)">
                 <div class="form-group">
-                  <label>Telegram Chat ID của Chủ Thu (Trưởng Nhóm)</label>
+                  <label>Telegram Username (@username) hoặc Chat ID của Bạn</label>
                   <div style="display: flex; gap: 8px;">
-                    <input type="text" id="ownerTelegramChatIdInput" placeholder="Ví dụ: 6817605055" />
+                    <input type="text" id="ownerTelegramChatIdInput" placeholder="Ví dụ: @huyvuong hoặc 6817605055" />
                     <button type="button" class="btn btn-outline-light btn-sm" onclick="window.open('https://t.me/thongbaodongtien_bot', '_blank')" title="Mở bot trên Telegram">
                       <i data-lucide="send"></i>
                       <span>Mở Bot</span>
                     </button>
                   </div>
                   <small class="helper-text">
-                    💡 <strong>Cách lấy Chat ID nhanh nhất:</strong> Mở Telegram chat với <code>@thongbaodongtien_bot</code> và bấm <strong>START</strong> (hoặc gõ <code>/start</code>). Bot sẽ trả lời Chat ID và tự động kích hoạt nhận tin duyệt tiền!
+                    💡 <strong>Linh hoạt:</strong> Bạn có thể điền <code>@username</code> (VD: <code>@huyvuong</code>) hoặc Chat ID số. Bot sẽ gửi tin nhắn duyệt riêng nếu bạn đã chat với Bot, hoặc tag <code>@username</code> trực tiếp trong nhóm để duyệt!
                   </small>
                 </div>
 
                 <div class="form-group mt-3" style="display: flex; align-items: center; gap: 10px;">
                   <input type="checkbox" id="ownerSyncAllGroupsCheckbox" style="width: 18px; height: 18px; cursor: pointer;" checked />
                   <label for="ownerSyncAllGroupsCheckbox" style="margin: 0; cursor: pointer; font-size: 0.9rem;">
-                    Tự động áp dụng Chat ID này làm Chủ Thu cho tất cả các Nhóm của bạn
+                    Tự động áp dụng thông tin này làm Chủ Thu cho tất cả các Nhóm của bạn
                   </label>
                 </div>
 
@@ -1041,10 +1041,10 @@
           <input type="number" id="groupThreadIdInput" placeholder="Ví dụ: 12" />
         </div>
         <div class="form-group" style="background: rgba(99, 102, 241, 0.08); padding: 12px; border-radius: 8px; border: 1px solid rgba(99, 102, 241, 0.25);">
-          <label style="color: #a5b4fc; font-weight: 600;">Telegram Chat ID của Chủ Thu (Trưởng Nhóm)</label>
-          <input type="text" id="groupAlertChatIdInput" placeholder="Ví dụ: 6817605055" />
+          <label style="color: #a5b4fc; font-weight: 600;">Người Duyệt Tiền / Chủ Thu (Username hoặc Chat ID)</label>
+          <input type="text" id="groupAlertChatIdInput" placeholder="Ví dụ: @huyvuong hoặc 6817605055" />
           <small class="helper-text" style="color: #cbd5e1;">
-            ⚡ <strong>Chat ID cá nhân của bạn:</strong> Bot sẽ gửi tin nhắn riêng cho bạn kèm nút <strong>[ ✅ Đã Nhận Tiền ]</strong> khi thành viên bấm báo chuyển tiền. Mở chat riêng với bot và bấm <code>/start</code> để lấy mã này.
+            ⚡ <strong>Linh hoạt:</strong> Điền <code>@username</code> hoặc Chat ID số. Khi thành viên bấm báo chuyển tiền, Bot sẽ gửi tin duyệt riêng hoặc tag trực tiếp người này trong nhóm kèm nút <strong>[ ✅ Đã Nhận Tiền ]</strong>.
           </small>
         </div>
         <div class="modal-footer">
@@ -1104,10 +1104,10 @@
             </div>
 
             <div class="form-group mt-2" style="background: rgba(99, 102, 241, 0.08); padding: 12px; border-radius: 8px; border: 1px solid rgba(99, 102, 241, 0.25);">
-              <label style="color: #a5b4fc; font-weight: 600;">Telegram Chat ID Người Thu Tiền (Duyệt Tiền Dịch Vụ Này)</label>
-              <input type="text" id="svcCollectorChatIdInput" placeholder="Ví dụ: 6817605055 (Để trống sẽ dùng của nhóm)" />
+              <label style="color: #a5b4fc; font-weight: 600;">Người Thu Tiền / Duyệt Tiền Dịch Vụ Này (Username hoặc Chat ID)</label>
+              <input type="text" id="svcCollectorChatIdInput" placeholder="Ví dụ: @huyvuong hoặc 6817605055 (Để trống sẽ dùng của nhóm)" />
               <small class="helper-text" style="color: #cbd5e1;">
-                👤 <strong>Tùy chỉnh người nhận duyệt:</strong> Nếu khoản này do người khác thu (không phải chủ nhóm), điền Chat ID của người đó tại đây. Khi thành viên báo đã chuyển, bot sẽ gửi tin nhắn riêng cho người này duyệt!
+                👤 <strong>Tùy chỉnh người duyệt riêng:</strong> Điền <code>@username</code> hoặc Chat ID nếu dịch vụ này do người khác thu. Bot sẽ gửi tin riêng hoặc tag trực tiếp người này trong nhóm để duyệt!
               </small>
             </div>
 
@@ -1132,7 +1132,7 @@
               </div>
               <div class="form-group col-6" id="svcTotalAmountCol">
                 <label id="svcTotalAmountLabel">Tổng số tiền (VNĐ)</label>
-                <input type="number" id="svcTotalAmountInput" value="260000" oninput="updateLivePreview()" />
+                <input type="number" id="svcTotalAmountInput" value="260000" min="0" step="any" oninput="updateLivePreview()" />
               </div>
             </div>
 
@@ -1250,7 +1250,7 @@
         </div>
         <div class="form-group">
           <label>Số tiền đóng riêng (VNĐ - Tùy chọn)</label>
-          <input type="number" id="memberCustomAmountInput" placeholder="Để trống nếu tính theo mặc định của dịch vụ" />
+          <input type="number" id="memberCustomAmountInput" placeholder="Để trống nếu tính theo mặc định của dịch vụ" min="0" step="any" />
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-light" onclick="closeModal('memberModal')">Hủy</button>
@@ -1268,7 +1268,7 @@
       <div class="modal-header">
         <h3 style="display: flex; align-items: center; gap: 8px;">
           <i data-lucide="copy" class="text-primary"></i>
-          <span>Sao Chép Thành Viên Từ Dịch Vụ Khác</span>
+          <span>Sao Chép Thành Viên Từ Dịch VỤ Khác</span>
         </h3>
         <button class="btn-close-modal" onclick="closeModal('copyMembersModal')"><i data-lucide="x"></i></button>
       </div>
@@ -1369,7 +1369,7 @@
               <div class="text-muted" style="font-size: 0.78rem;">Nhập tổng tiền hóa đơn, hệ thống sẽ tự chia đều cho các thành viên.</div>
             </div>
             <div style="display: flex; gap: 8px; align-items: center;">
-              <input type="number" id="batchQuickTotalInput" placeholder="Tổng tiền (VNĐ)..." style="width: 170px;" />
+              <input type="number" id="batchQuickTotalInput" placeholder="Tổng tiền (VNĐ)..." min="0" step="any" style="width: 170px;" />
               <button type="button" class="btn btn-outline-primary btn-sm" onclick="applyQuickSplit()">
                 <i data-lucide="calculator"></i>
                 <span>Tự động chia đều</span>

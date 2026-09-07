@@ -512,7 +512,7 @@ function renderGroupsGrid() {
 
         <div class="chat-id-wrap mt-1">
           <span class="text-muted" style="font-size: 0.75rem;">Chủ Thu (Duyệt Tiền):</span>
-          ${g.alertChatId ? `<code>${escapeHtml(g.alertChatId)}</code> <span class="badge badge-success" style="font-size: 0.65rem; padding: 2px 6px;">Đã kết nối</span>` : `<span class="badge badge-warning" style="font-size: 0.68rem; padding: 2px 6px;">Chưa gán</span>`}
+          ${g.alertUsername ? `<span class="badge badge-accent" style="font-size: 0.72rem; padding: 2px 6px;">@${escapeHtml(g.alertUsername)}</span>` : (g.alertChatId ? `<code>${escapeHtml(g.alertChatId)}</code> <span class="badge badge-success" style="font-size: 0.65rem; padding: 2px 6px;">Đã kết nối</span>` : `<span class="badge badge-warning" style="font-size: 0.68rem; padding: 2px 6px;">Chưa gán</span>`)}
         </div>
 
         <div class="group-stats-row mt-2">
@@ -606,7 +606,7 @@ function renderServicesGrid() {
           </div>
           <div class="service-meta-row">
             <span>Người thu tiền:</span>
-            <span>${svc.collectorChatId ? `<code>${escapeHtml(svc.collectorChatId)}</code> <span class="badge badge-accent" style="font-size: 0.65rem; padding: 2px 6px;">Riêng</span>` : `<span class="text-muted" style="font-size: 0.75rem;">Theo nhóm / Admin</span>`}</span>
+            <span>${svc.collectorUsername ? `<span class="badge badge-accent" style="font-size: 0.72rem; padding: 2px 6px;">@${escapeHtml(svc.collectorUsername)}</span>` : (svc.collectorChatId ? `<code>${escapeHtml(svc.collectorChatId)}</code> <span class="badge badge-accent" style="font-size: 0.65rem; padding: 2px 6px;">Riêng</span>` : `<span class="text-muted" style="font-size: 0.75rem;">Theo nhóm / Admin</span>`)}</span>
           </div>
           <div class="service-meta-row">
             <span>Tiền tố chuyển khoản:</span>
@@ -699,7 +699,7 @@ function editGroup(id) {
   document.getElementById("groupChatIdInput").value = g.chatId;
   document.getElementById("groupThreadIdInput").value = g.threadId || "";
   const alertInput = document.getElementById("groupAlertChatIdInput");
-  if (alertInput) alertInput.value = g.alertChatId || "";
+  if (alertInput) alertInput.value = g.alertUsername ? ('@' + g.alertUsername) : (g.alertChatId || "");
   document.getElementById("groupModalTitle").innerText =
     "Chỉnh Sửa Nhóm Telegram";
   openModal("groupModal");
@@ -852,7 +852,7 @@ async function loadMembersForServiceModal() {
           <div style="font-size: 0.75rem; color: #64748b;">Mã CK: <code>${escapeHtml(m.transferCode)}</code></div>
         </div>
         <div style="display: flex; align-items: center; gap: 6px;">
-          <input type="number" class="svc-member-amount-input" data-member-id="${m.id}" value="${m.customAmount || 0}" min="0" step="1000" oninput="calculateSvcMemberTotal()" style="width: 120px; padding: 4px 8px; font-size: 0.85rem; font-weight: 600; text-align: right;" />
+          <input type="number" class="svc-member-amount-input" data-member-id="${m.id}" value="${m.customAmount || 0}" min="0" step="any" oninput="calculateSvcMemberTotal()" style="width: 120px; padding: 4px 8px; font-size: 0.85rem; font-weight: 600; text-align: right;" />
           <span style="font-size: 0.8rem; color: #94a3b8;">đ/tháng</span>
         </div>
       </div>
@@ -926,7 +926,7 @@ function openAddServiceModal() {
 • STK: \`{accountNumber}\`
 • Chủ TK: *{accountName}*
 
-⚡ *Quét mã QR đính kèm để tự động điền STK & số tiền!*`;
+⚡ *Quét mã QR đính kèm hoặc gõ /guitien để lấy mã QR riêng của bạn!*`;
 
   openModal("serviceModal");
   updateLivePreview();
@@ -941,7 +941,7 @@ function editService(id) {
   document.getElementById("svcNameInput").value = svc.name;
   document.getElementById("svcPrefixInput").value = svc.transferPrefix || "";
   if (document.getElementById("svcCollectorChatIdInput")) {
-    document.getElementById("svcCollectorChatIdInput").value = svc.collectorChatId || "";
+    document.getElementById("svcCollectorChatIdInput").value = svc.collectorUsername ? ('@' + svc.collectorUsername) : (svc.collectorChatId || "");
   }
   document.getElementById("svcScheduleTypeSelect").value =
     svc.scheduleType || "monthly";
@@ -1231,7 +1231,7 @@ function renderBatchMembersTable(svc) {
         </td>
         <td><code>${escapeHtml(m.transferCode)}</code></td>
         <td>
-          <input type="number" class="batch-member-amount-input" data-member-id="${m.id}" value="${initAmount}" min="0" step="1000" oninput="calculateBatchTotal()" style="padding: 6px 10px; font-weight: 600;" />
+          <input type="number" class="batch-member-amount-input" data-member-id="${m.id}" value="${initAmount}" min="0" step="any" oninput="calculateBatchTotal()" style="padding: 6px 10px; font-weight: 600;" />
         </td>
       </tr>
     `;
@@ -2214,19 +2214,24 @@ function renderHistoryTable() {
 
   tbody.innerHTML = state.history
     .map(
-      (r) => `
+      (r) => {
+        const timeStr = r.sentAt ? new Date(r.sentAt).toLocaleString("vi-VN") : "N/A";
+        const errorInfo = r.error ? `<div style="font-size: 0.72rem; color: #f87171; margin-top: 2px;">Lý do: ${escapeHtml(r.error)}</div>` : "";
+        return `
     <tr>
-      <td>${escapeHtml(r.sentAt?.replace("T", " ").substring(0, 19))}</td>
+      <td>${escapeHtml(timeStr)}</td>
       <td><strong>${escapeHtml(r.month)}</strong></td>
       <td><code>${escapeHtml(r.key)}</code></td>
       <td>
         <span class="badge ${r.status === "success" ? "badge-success" : "badge-danger"}">
           ${r.status === "success" ? "Thành công" : "Thất bại"}
         </span>
+        ${errorInfo}
       </td>
       <td>${r.messageId ? `#${r.messageId}` : '<span class="text-muted">N/A</span>'}</td>
     </tr>
-  `,
+  `;
+      }
     )
     .join("");
 }
@@ -2456,8 +2461,8 @@ async function loadOwnerTelegramProfile() {
     const data = await res.json();
     if (data.success && data.user) {
       const input = document.getElementById("ownerTelegramChatIdInput");
-      if (input && data.user.telegramChatId) {
-        input.value = data.user.telegramChatId;
+      if (input) {
+        input.value = data.user.telegramUsername ? ('@' + data.user.telegramUsername) : (data.user.telegramChatId || "");
       }
     }
   } catch (err) {
@@ -2471,7 +2476,7 @@ async function handleSaveOwnerTelegramConfig(e) {
   const syncCheckbox = document.getElementById("ownerSyncAllGroupsCheckbox");
   const btn = document.getElementById("btnSaveOwnerTelegram");
 
-  const telegramChatId = input ? input.value.trim() : "";
+  const rawInput = input ? input.value.trim() : "";
   const syncToGroups = syncCheckbox ? syncCheckbox.checked : true;
 
   btn.disabled = true;
@@ -2481,11 +2486,11 @@ async function handleSaveOwnerTelegramConfig(e) {
     const res = await fetch("/api/user/profile", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ telegramChatId, syncToGroups }),
+      body: JSON.stringify({ telegramChatId: rawInput, syncToGroups }),
     });
     const data = await res.json();
     if (data.success) {
-      showToast("Đã lưu cấu hình Chat ID Chủ Thu thành công!", "success");
+      showToast("Đã lưu cấu hình thông tin Chủ Thu thành công!", "success");
       loadGroupsAndServices();
     } else {
       showToast(data.error || "Lỗi khi lưu cấu hình Chủ Thu", "error");

@@ -35,7 +35,7 @@ export class ReminderService {
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
-      hour12: false
+      hourCycle: 'h23'
     });
 
     const parts = formatter.formatToParts(date);
@@ -217,7 +217,7 @@ export class ReminderService {
         callbackData: `pay_batch:${monthlyBatch.id}:${m.memberId}`
       }));
 
-      const groupMsg = `${message}\n\n👇 *BẤM VÀO TÊN BẠN DƯỚI ĐÂY ĐỂ LẤY MÃ VIETQR RIÊNG (TỰ ĐỘNG XÓA SAU KHI CK):*`;
+      const groupMsg = `${message}\n\n💡 _Hoặc gõ lệnh_ \`/guitien\` _trong nhóm để lấy nhanh mã VietQR riêng của bạn_\n👇 *BẤM VÀO TÊN BẠN DƯỚI ĐÂY ĐỂ LẤY MÃ VIETQR RIÊNG (TỰ ĐỘNG XÓA SAU KHI CK):*`;
       const result = await this.telegram.sendMessageWithButtons(group.chatId, groupMsg, buttons, group.threadId);
       monthlyBatch.messageId = result.messageId;
 
@@ -333,6 +333,7 @@ export class ReminderService {
     msg += `• Ngân hàng: *${service.bankInfo.bankCode}*\n`;
     msg += `• STK: \`${service.bankInfo.accountNumber}\`\n`;
     msg += `• Chủ TK: *${service.bankInfo.accountName}*\n\n`;
+    msg += `💡 _Hoặc gõ lệnh_ \`/guitien\` _trong nhóm để lấy nhanh mã VietQR riêng của bạn_\n`;
     msg += `👇 *BẤM VÀO TÊN BẠN DƯỚI ĐÂY ĐỂ LẤY MÃ VIETQR RIÊNG (TỰ ĐỘNG XÓA SAU KHI CK):*`;
 
     // Gửi tin nhắn thông báo kèm nút bấm thành viên vào nhóm
@@ -464,7 +465,7 @@ export class ReminderService {
         groupMsg += `• ${tag}: *${item.amount.toLocaleString('vi-VN')}đ* ➔ ND: \`${fullCode}\`\n`;
       });
 
-      groupMsg += `\n👇 *BẤM VÀO TÊN BẠN ĐỂ LẤY MÃ VIETQR RIÊNG (TỰ ĐỘNG XÓA SAU KHI CK):*`;
+      groupMsg += `\n💡 _Hoặc gõ lệnh_ \`/guitien\` _trong nhóm để lấy nhanh mã VietQR riêng của bạn_\n👇 *BẤM VÀO TÊN BẠN ĐỂ LẤY MÃ VIETQR RIÊNG (TỰ ĐỘNG XÓA SAU KHI CK):*`;
 
       const groupRes = await this.telegram.sendMessageWithButtons(group.chatId, groupMsg, buttons, group.threadId);
       if (groupRes.success) groupRemindersSent++;
@@ -508,7 +509,7 @@ export class ReminderService {
       };
     });
 
-    const fullMessageWithButtons = `${fullMessage}\n\n👇 *BẤM VÀO TÊN BẠN DƯỚI ĐÂY ĐỂ LẤY MÃ VIETQR RIÊNG (TỰ ĐỘNG XÓA SAU KHI CK):*`;
+    const fullMessageWithButtons = `${fullMessage}\n\n💡 _Hoặc gõ lệnh_ \`/guitien\` _trong nhóm để lấy nhanh mã VietQR riêng của bạn_\n👇 *BẤM VÀO TÊN BẠN DƯỚI ĐÂY ĐỂ LẤY MÃ VIETQR RIÊNG (TỰ ĐỘNG XÓA SAU KHI CK):*`;
     const result = await this.telegram.sendMessageWithButtons(group.chatId, fullMessageWithButtons, buttons, group.threadId);
 
     return {

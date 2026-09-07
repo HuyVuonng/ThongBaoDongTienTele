@@ -58,6 +58,7 @@ export class JsonStore {
       transactions: [],
       reminderReceipts: [],
       monthlyPayments: [],
+      usernameMappings: {},
       updatedAt: new Date().toISOString()
     };
     fs.writeFileSync(this.filePath, JSON.stringify(initial, null, 2), 'utf-8');
@@ -81,6 +82,7 @@ export class JsonStore {
       this.cache.transactions = this.cache.transactions || [];
       this.cache.reminderReceipts = this.cache.reminderReceipts || [];
       this.cache.monthlyPayments = this.cache.monthlyPayments || [];
+      this.cache.usernameMappings = this.cache.usernameMappings || {};
       return this.cache;
     } catch (error) {
       console.error('❌ Lỗi đọc state.json:', error);
