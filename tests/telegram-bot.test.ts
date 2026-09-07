@@ -367,4 +367,31 @@ describe('TelegramBotService /guitien and Member Payment Resolution Tests', () =
     expect(unpaidItems[0].service.id).toBe('svc-2'); // Spotify chưa đóng -> chỉ bắn QR của Spotify
     expect(unpaidItems[0].amount).toBe(30000);
   });
+
+  it('nên xử lý an toàn username có dấu gạch dưới _ như @chuongph_geoit và @duynle_geoit trong formatTag', () => {
+    expect(telegramService.formatTag('chuongph_geoit', 'Chuong PH')).toBe('@chuongph\\_geoit');
+    expect(telegramService.formatTag('@duynle_geoit_2026', 'Duy Le')).toBe('@duynle\\_geoit\\_2026');
+    expect(telegramService.formatTag(undefined, 'Nguyen Van A')).toBe('*Nguyen Van A*');
+    expect(telegramService.formatTag('', '')).toBe('Thành viên');
+  });
+
+  it('nên escapeMarkdown đúng các ký tự markdown nhạy cảm và stripMarkdown khi fallback', () => {
+    const raw = 'Hello _world_ *bold* `code` [link]';
+    const escaped = telegramService.escapeMarkdown(raw);
+    expect(escaped).toBe('Hello \\_world\\_ \\*bold\\* \\`code\\` \\[link\\]');
+
+    const stripped = telegramService.stripMarkdown(raw);
+    expect(stripped).toBe('Hello world bold code [link]');
+  });
+
+  it('nên phân giải đúng collector với safeTag có escape khi username chứa dấu gạch dưới', () => {
+    const service: Partial<Service> = {
+      collectorUsername: '@lead_boss_99'
+    };
+    const result = telegramService.resolveCollector(service as Service, undefined, mockState as AppState);
+
+    expect(result.username).toBe('lead_boss_99');
+    expect(result.tag).toBe('@lead_boss_99');
+    expect(result.safeTag).toBe('@lead\\_boss\\_99');
+  });
 });

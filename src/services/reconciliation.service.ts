@@ -297,13 +297,14 @@ export class ReconciliationService {
 
     // 4. Gửi thông báo Telegram
     if (match.matched && match.group && match.service && match.member) {
-      const tag = match.member.telegramUsername ? `@${match.member.telegramUsername}` : `*${match.member.name}*`;
+      const tag = this.telegram.formatTag(match.member.telegramUsername, match.member.name);
+      const safeSvcName = (match.service.name || '').replace(/[*_`\\]/g, '');
       const displayMonth = match.targetMonth ? `${match.targetMonth.split('-')[1]}/${match.targetMonth.split('-')[0]}` : '';
 
       const notifyMsg = 
         `✅ *XÁC NHẬN THANH TOÁN THÀNH CÔNG*\n\n` +
         `👤 Thành viên: ${tag}\n` +
-        `📦 Dịch vụ: *${match.service.name}*\n` +
+        `📦 Dịch vụ: *${safeSvcName}*\n` +
         `💰 Số tiền nhận: *${incomingTx.amount.toLocaleString('vi-VN')}đ*\n` +
         `🗓️ Kỳ: *Tháng ${displayMonth}*\n\n` +
         `🎉 _Hệ thống đã tự động ghi nhận! Cảm ơn bạn!_`;

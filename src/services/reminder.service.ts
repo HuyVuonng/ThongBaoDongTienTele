@@ -74,7 +74,7 @@ export class ReminderService {
           const amount = service.mode === 'per_member' && m.customAmount
             ? m.customAmount
             : (service.defaultAmountPerMember || Math.round(service.totalAmount / activeMembers.length));
-          const tag = m.telegramUsername ? `@${m.telegramUsername}` : m.name;
+          const tag = this.telegram.formatTag(m.telegramUsername, m.name);
           const fullCode = this.getPrefixedTransferCode(service, m.transferCode);
           return `• ${tag}: *${amount.toLocaleString('vi-VN')}đ* ➔ ND: \`${fullCode}\``;
         })
@@ -324,7 +324,7 @@ export class ReminderService {
     msg += `📋 *Danh sách cần đóng (${batchMembers.length} người):*\n`;
 
     batchMembers.forEach((m) => {
-      const tag = m.telegramUsername ? `@${m.telegramUsername}` : m.name;
+      const tag = this.telegram.formatTag(m.telegramUsername, m.name);
       const fullCode = this.getPrefixedTransferCode(service, m.transferCode);
       msg += `• ${tag}: *${m.amount.toLocaleString('vi-VN')}đ* ➔ ND: \`${fullCode}\`\n`;
     });
@@ -460,7 +460,7 @@ export class ReminderService {
         `Hiện tại còn *${unpaidMembers.length} thành viên* chưa hoàn tất đóng tiền:\n`;
 
       unpaidMembers.forEach(item => {
-        const tag = item.member.telegramUsername ? `@${item.member.telegramUsername}` : item.member.name;
+        const tag = this.telegram.formatTag(item.member.telegramUsername, item.member.name);
         const fullCode = this.getPrefixedTransferCode(service, item.member.transferCode);
         groupMsg += `• ${tag}: *${item.amount.toLocaleString('vi-VN')}đ* ➔ ND: \`${fullCode}\`\n`;
       });

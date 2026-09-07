@@ -59,7 +59,7 @@ export class TelegramBotService {
     service?: Service,
     group?: Group,
     state?: any
-  ): { chatId?: string; username?: string; tag: string } {
+  ): { chatId?: string; username?: string; tag: string; safeTag: string } {
     let rawUsername = (service?.collectorUsername || '').replace(/^@/, '').trim().toLowerCase();
     let rawChatId = (service?.collectorChatId || '').trim();
 
@@ -115,17 +115,33 @@ export class TelegramBotService {
     }
 
     const tag = rawUsername ? `@${rawUsername}` : (resolvedChatId ? `\`${resolvedChatId}\`` : 'Trưởng nhóm');
+    const safeTag = rawUsername ? `@${this.escapeMarkdown(rawUsername)}` : (resolvedChatId ? `\`${resolvedChatId}\`` : 'Trưởng nhóm');
 
     return {
       chatId: resolvedChatId || undefined,
       username: rawUsername || undefined,
-      tag
+      tag,
+      safeTag
     };
   }
 
   public escapeMarkdown(text: string): string {
     if (!text) return '';
-    return text.replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, '\\$&');
+    return text.replace(/[_*[\]`\\]/g, '\\$&');
+  }
+
+  public stripMarkdown(text: string): string {
+    if (!text) return '';
+    return text.replace(/[*_`\\]/g, '');
+  }
+
+  public formatTag(username?: string, name?: string): string {
+    const cleanUser = (username || '').replace(/^@/, '').trim();
+    if (cleanUser) {
+      return `@${this.escapeMarkdown(cleanUser)}`;
+    }
+    const cleanName = (name || '').replace(/[*_`\\]/g, '').trim();
+    return cleanName ? `*${cleanName}*` : 'Thành viên';
   }
 
   private async safeSendQR(
@@ -512,19 +528,25 @@ export class TelegramBotService {
       const { items, targetUsername, memberName } = result;
       const unpaidItems = items.filter(it => it.status !== 'paid');
 
-      const tag = targetUsername ? `@${targetUsername}` : (memberName ? `*${memberName}*` : 'bạn');
+      const tag = this.formatTag(targetUsername, memberName);
 
       if (unpaidItems.length === 0) {
-        await ctx.reply(
+        const completedMsg =
           `✅ *HOÀN TẤT ĐÓNG TIỀN*\n\n` +
           `👤 Thành viên: ${tag}\n` +
           `🎉 Bạn đã hoàn tất đóng toàn bộ tiền dịch vụ trong nhóm này!\n` +
-          `Cảm ơn bạn đã thanh toán đúng hạn! 🚀`,
-          {
+          `Cảm ơn bạn đã thanh toán đúng hạn! 🚀`;
+
+        try {
+          await ctx.reply(completedMsg, {
             parse_mode: 'Markdown',
             reply_to_message_id: ctx.message?.message_id
-          }
-        );
+          });
+        } catch (e) {
+          await ctx.reply(completedMsg.replace(/[*_`\\]/g, ''), {
+            reply_to_message_id: ctx.message?.message_id
+          });
+        }
         return;
       }
 
@@ -747,22 +769,28 @@ export class TelegramBotService {
         }
       });
 
-      const tag = matchedMember.telegramUsername ? `@${matchedMember.telegramUsername}` : `*${matchedMember.name}*`;
-      await ctx.reply(
+      const tag = this.formatTag(matchedMember.telegramUsername, matchedMember.name);
+      const safeSvcName = (targetService.name || '').replace(/[*_`\\]/g, '');
+      const successReply =
         `✅ *ĐÃ ĐÁNH DẤU HOÀN TẤT ĐÓNG TIỀN*\n\n` +
         `👤 Thành viên: ${tag}\n` +
-        `📦 Dịch vụ: *${targetService.name}*\n` +
+        `📦 Dịch vụ: *${safeSvcName}*\n` +
         `💰 Số tiền: *${amount.toLocaleString('vi-VN')}đ*\n\n` +
-        `🎉 _Cảm ơn bạn! Hệ thống đã ghi nhận thành công._ 🚀`,
-        { parse_mode: 'Markdown' }
-      );
+        `🎉 _Cảm ơn bạn! Hệ thống đã ghi nhận thành công._ 🚀`;
+
+      try {
+        await ctx.reply(successReply, { parse_mode: 'Markdown' });
+      } catch (e) {
+        await ctx.reply(successReply.replace(/[*_`\\]/g, ''));
+      }
     });
 
     // Lệnh /chatid
     this.bot.command('chatid', async ctx => {
       const chatId = ctx.chat.id;
       const threadId = ctx.message?.message_thread_id;
-      const title = 'title' in ctx.chat ? ctx.chat.title : ctx.from?.first_name || 'Direct Chat';
+      const rawTitle = 'title' in ctx.chat ? ctx.chat.title : ctx.from?.first_name || 'Direct Chat';
+      const title = (rawTitle || '').replace(/[*_`\\]/g, '');
 
       let msg = `🏷️ *Thông tin Telegram Chat*\n\n`;
       msg += `• *Tên:* ${title}\n`;
@@ -772,7 +800,11 @@ export class TelegramBotService {
       }
       msg += `\n_Sao chép Chat ID trên và dán vào phần cài đặt Nhóm trên Web Dashboard._`;
 
-      await ctx.reply(msg, { parse_mode: 'Markdown' });
+      try {
+        await ctx.reply(msg, { parse_mode: 'Markdown' });
+      } catch (e) {
+        await ctx.reply(msg.replace(/[*_`\\]/g, ''));
+      }
     });
 
     // Lệnh /status
@@ -790,7 +822,8 @@ export class TelegramBotService {
 
       const services = await this.store.getServices(group.id);
       if (services.length === 0) {
-        await ctx.reply(`ℹ️ Nhóm *${group.title}* hiện chưa cấu hình dịch vụ nào.`, { parse_mode: 'Markdown' });
+        const safeTitle = (group.title || '').replace(/[*_`\\]/g, '');
+        await ctx.reply(`ℹ️ Nhóm *${safeTitle}* hiện chưa cấu hình dịch vụ nào.`, { parse_mode: 'Markdown' });
         return;
       }
 
@@ -803,8 +836,9 @@ export class TelegramBotService {
         if (!svc.active) continue;
         const members = await this.store.getMembers(svc.id);
         const state = await this.store.read();
+        const safeSvcName = (svc.name || '').replace(/[*_`\\]/g, '');
         
-        msg += `🔹 *${svc.name}* (Ngày nhắc: ${svc.reminderDay} hàng tháng)\n`;
+        msg += `🔹 *${safeSvcName}* (Ngày nhắc: ${svc.reminderDay} hàng tháng)\n`;
         msg += `• Tổng tiền: *${svc.totalAmount.toLocaleString('vi-VN')}đ*\n`;
         msg += `• Danh sách thành viên:\n`;
 
@@ -814,14 +848,20 @@ export class TelegramBotService {
           const isPaid = payment && payment.status === 'paid';
           const isPending = payment && payment.status === 'pending_verify';
           const icon = isPaid ? '✅' : (isPending ? '⏳' : '❌');
-          const tag = m.telegramUsername ? `@${m.telegramUsername}` : m.name;
+          const rawMemTag = (m.telegramUsername || '').replace(/^@/, '').trim();
+          const tag = rawMemTag ? `@${this.escapeMarkdown(rawMemTag)}` : (m.name || '').replace(/[*_`\\]/g, '');
+          const safeCode = (m.transferCode || '').replace(/[`\\]/g, '');
           const statusText = isPaid ? 'Đã đóng' : (isPending ? 'Chờ duyệt' : 'Chưa đóng');
-          msg += `  ${icon} ${tag} (\`${m.transferCode}\`): *${statusText}*\n`;
+          msg += `  ${icon} ${tag} (\`${safeCode}\`): *${statusText}*\n`;
         }
         msg += `\n`;
       }
 
-      await ctx.reply(msg, { parse_mode: 'Markdown' });
+      try {
+        await ctx.reply(msg, { parse_mode: 'Markdown' });
+      } catch (e) {
+        await ctx.reply(msg.replace(/[*_`\\]/g, ''));
+      }
     });
 
     // Lệnh /help
@@ -1132,18 +1172,28 @@ export class TelegramBotService {
           .text('✅ Đã Nhận Tiền', approveData)
           .text('❌ Chưa Thấy Tiền', rejectData);
 
+        // Chuẩn bị các biến hiển thị an toàn cho Markdown
+        const rawMemberTag = (memberTag || '').replace(/^@/, '').trim();
+        const safeTag = this.formatTag(rawMemberTag, memberName);
+        const safeMemberName = (memberName || '').replace(/[`\\]/g, '');
+        const safeServiceName = (serviceName || '').replace(/[*_`\\]/g, '');
+        const safeGroupTitle = (groupTitle || '').replace(/[*_`\\]/g, '');
+        const safeTransferCode = fullTransferCode.replace(/[`\\]/g, '');
+        const safeCollectorTag = collector.safeTag;
+        const plainCollectorName = collector.username ? `@${collector.username}` : (collector.chatId ? `ID ${collector.chatId}` : 'Trưởng nhóm');
+
         let dmSuccess = false;
 
         // Nếu có Chat ID riêng, thử gửi tin nhắn riêng cho người duyệt trước
         if (collector.chatId) {
           const verifyTextDM =
             `🔔 *YÊU CẦU XÁC NHẬN CHUYỂN KHOẢN (DUYỆT TIỀN)*\n\n` +
-            `👥 *Nhóm:* ${groupTitle}\n` +
-            `📦 *Dịch vụ / Đợt thu:* *${serviceName}*\n` +
-            `👤 *Thành viên:* ${tag} (\`${memberName}\`)\n` +
-            `💰 *Số tiền:* *${amount.toLocaleString('vi-VN')}đ*\n` +
-            `📝 *Nội dung CK:* \`${fullTransferCode}\`\n` +
-            `⏰ *Thời gian:* ${new Date().toLocaleTimeString('vi-VN')} ${new Date().toLocaleDateString('vi-VN')}\n\n` +
+            `👥 Nhóm: *${safeGroupTitle}*\n` +
+            `📦 Dịch vụ / Đợt thu: *${safeServiceName}*\n` +
+            `👤 Thành viên: ${safeTag} (\`${safeMemberName}\`)\n` +
+            `💰 Số tiền: *${amount.toLocaleString('vi-VN')}đ*\n` +
+            `📝 Nội dung CK: \`${safeTransferCode}\`\n` +
+            `⏰ Thời gian: ${new Date().toLocaleTimeString('vi-VN')} ${new Date().toLocaleDateString('vi-VN')}\n\n` +
             `👇 *Vui lòng kiểm tra App ngân hàng xem tiền đã vào chưa và bấm duyệt:*`;
 
           try {
@@ -1153,20 +1203,31 @@ export class TelegramBotService {
             });
             dmSuccess = true;
           } catch (sendErr: any) {
-            console.warn(`⚠️ Không thể gửi tin nhắn riêng tới ${collector.chatId}, chuyển sang thông báo vào nhóm:`, sendErr?.message || sendErr);
+            console.warn(`⚠️ Lỗi gửi Markdown DM tới ${collector.chatId}, thử fallback text thường:`, sendErr?.message || sendErr);
+            try {
+              const plainDM = verifyTextDM.replace(/[*_`\\]/g, '');
+              await this.bot?.api.sendMessage(collector.chatId, plainDM, {
+                reply_markup: verifyKeyboard
+              });
+              dmSuccess = true;
+            } catch (dmFallbackErr: any) {
+              console.warn(`⚠️ Không thể gửi tin nhắn riêng tới ${collector.chatId}, chuyển sang thông báo vào nhóm:`, dmFallbackErr?.message || dmFallbackErr);
+            }
           }
         }
 
         if (dmSuccess) {
-          await ctx.answerCallbackQuery({
-            text: `🔔 Đã gửi tin nhắn riêng cho ${collector.tag} duyệt tiền!`
-          });
+          try {
+            await ctx.answerCallbackQuery({
+              text: `🔔 Đã gửi tin nhắn riêng cho ${plainCollectorName} duyệt tiền!`
+            });
+          } catch (e) {}
 
           // Bắn thông báo ngắn vào nhóm để mọi người cùng biết
           if (groupChatId) {
             await this.sendMessage(
               String(groupChatId),
-              `⏳ ${tag} vừa báo đã chuyển khoản *${amount.toLocaleString('vi-VN')}đ* cho *${serviceName}*! Bot đã gửi tin nhắn riêng cho ${collector.tag} để xác nhận.`,
+              `⏳ ${safeTag} vừa báo đã chuyển khoản *${amount.toLocaleString('vi-VN')}đ* cho *${safeServiceName}*! Bot đã gửi tin nhắn riêng cho ${safeCollectorTag} để xác nhận.`,
               groupObj?.threadId
             );
           }
@@ -1174,29 +1235,42 @@ export class TelegramBotService {
           // CHẾ ĐỘ HYBRID: Nếu chưa có Chat ID riêng hoặc gửi DM thất bại -> Gửi thông báo kèm nút duyệt trực tiếp vào nhóm và Tag @username
           const verifyTextGroup =
             `🔔 *YÊU CẦU XÁC NHẬN CHUYỂN KHOẢN (DUYỆT TIỀN)*\n\n` +
-            `👑 *Người duyệt:* ${collector.tag}\n` +
-            `👤 *Thành viên:* ${tag} (\`${memberName}\`)\n` +
-            `📦 *Dịch vụ / Đợt thu:* *${serviceName}*\n` +
-            `💰 *Số tiền:* *${amount.toLocaleString('vi-VN')}đ*\n` +
-            `📝 *Nội dung CK:* \`${fullTransferCode}\`\n` +
-            `⏰ *Thời gian:* ${new Date().toLocaleTimeString('vi-VN')} ${new Date().toLocaleDateString('vi-VN')}\n\n` +
-            `👇 *${collector.tag} (hoặc Quản trị viên) vui lòng kiểm tra App ngân hàng và bấm xác nhận:*`;
+            `👑 Người duyệt: ${safeCollectorTag}\n` +
+            `👤 Thành viên: ${safeTag} (\`${safeMemberName}\`)\n` +
+            `📦 Dịch vụ / Đợt thu: *${safeServiceName}*\n` +
+            `💰 Số tiền: *${amount.toLocaleString('vi-VN')}đ*\n` +
+            `📝 Nội dung CK: \`${safeTransferCode}\`\n` +
+            `⏰ Thời gian: ${new Date().toLocaleTimeString('vi-VN')} ${new Date().toLocaleDateString('vi-VN')}\n\n` +
+            `👇 ${safeCollectorTag} (hoặc Quản trị viên) vui lòng kiểm tra App ngân hàng và bấm xác nhận:`;
 
           if (groupChatId) {
-            await this.bot?.api.sendMessage(String(groupChatId), verifyTextGroup, {
-              parse_mode: 'Markdown',
-              message_thread_id: groupObj?.threadId,
-              reply_markup: verifyKeyboard
-            });
+            try {
+              await this.bot?.api.sendMessage(String(groupChatId), verifyTextGroup, {
+                parse_mode: 'Markdown',
+                message_thread_id: groupObj?.threadId,
+                reply_markup: verifyKeyboard
+              });
+            } catch (groupSendErr: any) {
+              console.warn(`⚠️ Lỗi gửi thông báo Markdown vào nhóm ${groupChatId}, fallback sang text thường:`, groupSendErr?.message);
+              try {
+                await this.bot?.api.sendMessage(String(groupChatId), verifyTextGroup.replace(/[*_`\\]/g, ''), {
+                  message_thread_id: groupObj?.threadId,
+                  reply_markup: verifyKeyboard
+                });
+              } catch (finalErr: any) {
+                console.error(`❌ Không thể gửi tin nhắn xác nhận vào nhóm:`, finalErr);
+              }
+            }
           }
 
-          await ctx.answerCallbackQuery({
-            text: `🔔 Đã gửi yêu cầu xác nhận vào nhóm cho ${collector.tag} duyệt!`
-          });
+          try {
+            await ctx.answerCallbackQuery({
+              text: `🔔 Đã gửi yêu cầu xác nhận vào nhóm cho ${plainCollectorName} duyệt!`
+            });
+          } catch (e) {}
         }
         return;
       }
-
 
       // =========================================================================
       // 3. XÁC NHẬN "ĐÃ NHẬN TIỀN" (APPROVE) TRONG TIN NHẮN RIÊNG HOẶC NHÓM
@@ -1322,48 +1396,63 @@ export class TelegramBotService {
           }
         }
 
-        const tag = memberTag ? `@${memberTag}` : `*${memberName}*`;
-        const approverTag = ctx.from?.username ? `@${ctx.from.username}` : (ctx.from?.first_name || 'Trưởng nhóm');
+        const rawMemberTag = (memberTag || '').replace(/^@/, '').trim();
+        const safeTag = this.formatTag(rawMemberTag, memberName);
+        const safeMemberName = (memberName || '').replace(/[`\\]/g, '');
+        const safeServiceName = (serviceName || '').replace(/[*_`\\]/g, '');
+        const rawApproverTag = (ctx.from?.username || '').replace(/^@/, '').trim();
+        const safeApproverTag = this.formatTag(rawApproverTag, ctx.from?.first_name || 'Trưởng nhóm');
+        const safeCollectorTag = collector.safeTag;
 
         // Cập nhật lại tin nhắn hiển thị (bỏ nút bấm)
         if (isGroupChat) {
+          const groupApprovedMsg =
+            `✅ *ĐÃ XÁC NHẬN THANH TOÁN THÀNH CÔNG*\n\n` +
+            `👤 Thành viên: ${safeTag} (\`${safeMemberName}\`)\n` +
+            `📦 Dịch vụ: *${safeServiceName}*\n` +
+            `💰 Số tiền: *${amount.toLocaleString('vi-VN')}đ*\n` +
+            `👑 Người duyệt: ${safeApproverTag}\n` +
+            `⏰ Lúc: ${new Date().toLocaleTimeString('vi-VN')} ${new Date().toLocaleDateString('vi-VN')}\n\n` +
+            `🎉 _Hệ thống đã ghi nhận hoàn tất. Cảm ơn bạn!_ 🚀`;
+
           try {
-            await ctx.editMessageText(
-              `✅ *ĐÃ XÁC NHẬN THANH TOÁN THÀNH CÔNG*\n\n` +
-              `👤 Thành viên: ${tag} (\`${memberName}\`)\n` +
-              `📦 Dịch vụ: *${serviceName}*\n` +
-              `💰 Số tiền: *${amount.toLocaleString('vi-VN')}đ*\n` +
-              `👑 Người duyệt: *${approverTag}*\n` +
-              `⏰ Lúc: ${new Date().toLocaleTimeString('vi-VN')} ${new Date().toLocaleDateString('vi-VN')}\n\n` +
-              `🎉 _Hệ thống đã ghi nhận hoàn tất. Cảm ơn bạn!_ 🚀`,
-              { parse_mode: 'Markdown' }
-            );
-          } catch (e) {}
+            await ctx.editMessageText(groupApprovedMsg, { parse_mode: 'Markdown' });
+          } catch (e) {
+            try {
+              await ctx.editMessageText(groupApprovedMsg.replace(/[*_`\\]/g, ''));
+            } catch (e2) {}
+          }
         } else {
+          const dmApprovedMsg =
+            `✅ *BẠN ĐÃ XÁC NHẬN THÀNH CÔNG!*\n\n` +
+            `👤 Thành viên: ${safeTag} (\`${safeMemberName}\`)\n` +
+            `💰 Số tiền: *${amount.toLocaleString('vi-VN')}đ*\n` +
+            `📦 Dịch vụ: *${safeServiceName}*\n` +
+            `⏰ Lúc: ${new Date().toLocaleTimeString('vi-VN')}\n\n` +
+            `_Bot đã gửi thông báo xác nhận vào nhóm và cập nhật Dashboard._`;
+
           try {
-            await ctx.editMessageText(
-              `✅ *BẠN ĐÃ XÁC NHẬN THÀNH CÔNG!*\n\n` +
-              `👤 Thành viên: ${tag} (\`${memberName}\`)\n` +
-              `💰 Số tiền: *${amount.toLocaleString('vi-VN')}đ*\n` +
-              `📦 Dịch vụ: *${serviceName}*\n` +
-              `⏰ Lúc: ${new Date().toLocaleTimeString('vi-VN')}\n\n` +
-              `_Bot đã gửi thông báo xác nhận vào nhóm và cập nhật Dashboard._`,
-              { parse_mode: 'Markdown' }
-            );
-          } catch (e) {}
+            await ctx.editMessageText(dmApprovedMsg, { parse_mode: 'Markdown' });
+          } catch (e) {
+            try {
+              await ctx.editMessageText(dmApprovedMsg.replace(/[*_`\\]/g, ''));
+            } catch (e2) {}
+          }
 
           // Bắn tin nhắn xác nhận hoàn tất vào nhóm nếu duyệt từ DM
           if (groupObj) {
             const successMsg =
               `✅ *XÁC NHẬN THANH TOÁN THÀNH CÔNG*\n\n` +
-              `Người duyệt (${collector.tag}) đã xác nhận: ${tag} đã nộp đủ *${amount.toLocaleString('vi-VN')}đ* cho *${serviceName}*!\n\n` +
+              `Người duyệt (${safeCollectorTag}) đã xác nhận: ${safeTag} đã nộp đủ *${amount.toLocaleString('vi-VN')}đ* cho *${safeServiceName}*!\n\n` +
               `🎉 _Hệ thống đã ghi nhận hoàn tất. Cảm ơn bạn!_ 🚀`;
 
             await this.sendPaymentSuccessNotification(groupObj.chatId, successMsg, groupObj.threadId);
           }
         }
 
-        await ctx.answerCallbackQuery({ text: `✅ Đã duyệt thành công cho ${memberName}!` });
+        try {
+          await ctx.answerCallbackQuery({ text: `✅ Đã duyệt thành công cho ${memberName}!` });
+        } catch (e) {}
 
         // Xóa mã QR cũ trong nhóm nếu có
         if (qrMsgId && qrChatId) {
@@ -1371,9 +1460,10 @@ export class TelegramBotService {
         }
 
         if (isAllCompleted && groupObj) {
+          const safeBatchName = (serviceName || '').replace(/[*_`\\]/g, '');
           const celebrationMsg =
             `🎉 *TẤT CẢ THÀNH VIÊN ĐÃ HOÀN TẤT ĐÓNG TIỀN!* 🎉\n\n` +
-            `📦 Đợt thu: *${serviceName}*\n` +
+            `📦 Đợt thu: *${safeBatchName}*\n` +
             `💰 Trạng thái: *100% thành viên đã hoàn thành*\n\n` +
             `❤️ _Cảm ơn tất cả mọi người đã đóng tiền đầy đủ!_ 🚀`;
           await this.sendMessage(groupObj.chatId, celebrationMsg, groupObj.threadId);
@@ -1472,43 +1562,58 @@ export class TelegramBotService {
           }
         }
 
-        const tag = memberTag ? `@${memberTag}` : `*${memberName}*`;
-        const rejecterTag = ctx.from?.username ? `@${ctx.from.username}` : (ctx.from?.first_name || 'Người duyệt');
+        const rawMemberTag = (memberTag || '').replace(/^@/, '').trim();
+        const safeTag = this.formatTag(rawMemberTag, memberName);
+        const safeMemberName = (memberName || '').replace(/[`\\]/g, '');
+        const safeServiceName = (serviceName || '').replace(/[*_`\\]/g, '');
+        const rawRejecterTag = (ctx.from?.username || '').replace(/^@/, '').trim();
+        const safeRejecterTag = this.formatTag(rawRejecterTag, ctx.from?.first_name || 'Người duyệt');
+        const safeCollectorTag = collector.safeTag;
 
         if (isGroupChat) {
+          const groupRejectMsg =
+            `⚠️ *TỪ CHỐI XÁC NHẬN CHUYỂN KHOẢN*\n\n` +
+            `👤 Thành viên: ${safeTag} (\`${safeMemberName}\`)\n` +
+            `📦 Dịch vụ: *${safeServiceName}*\n` +
+            `💰 Số tiền: *${amount.toLocaleString('vi-VN')}đ*\n` +
+            `👑 Người từ chối: ${safeRejecterTag}\n\n` +
+            `👉 ${safeTag} ơi, Người duyệt kiểm tra tài khoản nhưng *chưa thấy* khoản tiền này. Bạn vui lòng kiểm tra lại app ngân hàng hoặc gửi ảnh biên lai nhé!`;
+
           try {
-            await ctx.editMessageText(
-              `⚠️ *TỪ CHỐI XÁC NHẬN CHUYỂN KHOẢN*\n\n` +
-              `👤 Thành viên: ${tag} (\`${memberName}\`)\n` +
-              `📦 Dịch vụ: *${serviceName}*\n` +
-              `💰 Số tiền: *${amount.toLocaleString('vi-VN')}đ*\n` +
-              `👑 Người từ chối: *${rejecterTag}*\n\n` +
-              `👉 ${tag} ơi, Người duyệt kiểm tra tài khoản nhưng *chưa thấy* khoản tiền này. Bạn vui lòng kiểm tra lại app ngân hàng hoặc gửi ảnh biên lai nhé!`,
-              { parse_mode: 'Markdown' }
-            );
-          } catch (e) {}
+            await ctx.editMessageText(groupRejectMsg, { parse_mode: 'Markdown' });
+          } catch (e) {
+            try {
+              await ctx.editMessageText(groupRejectMsg.replace(/[*_`\\]/g, ''));
+            } catch (e2) {}
+          }
         } else {
+          const dmRejectMsg =
+            `❌ *BẠN ĐÃ TỪ CHỐI XÁC NHẬN*\n\n` +
+            `👤 Thành viên: ${safeTag} (\`${safeMemberName}\`)\n` +
+            `💰 Số tiền: *${amount.toLocaleString('vi-VN')}đ*\n\n` +
+            `_Bot đã thông báo cho thành viên để kiểm tra lại giao dịch._`;
+
           try {
-            await ctx.editMessageText(
-              `❌ *BẠN ĐÃ TỪ CHỐI XÁC NHẬN*\n\n` +
-              `👤 Thành viên: ${tag} (\`${memberName}\`)\n` +
-              `💰 Số tiền: *${amount.toLocaleString('vi-VN')}đ*\n\n` +
-              `_Bot đã thông báo cho thành viên để kiểm tra lại giao dịch._`,
-              { parse_mode: 'Markdown' }
-            );
-          } catch (e) {}
+            await ctx.editMessageText(dmRejectMsg, { parse_mode: 'Markdown' });
+          } catch (e) {
+            try {
+              await ctx.editMessageText(dmRejectMsg.replace(/[*_`\\]/g, ''));
+            } catch (e2) {}
+          }
 
           if (groupObj) {
             const rejectMsg =
-              `⚠️ *THÔNG BÁO TỪ NGƯỜI DUYỆT (${collector.tag})*\n\n` +
-              `${tag} ơi, Người duyệt kiểm tra tài khoản nhưng *chưa thấy* khoản chuyển *${amount.toLocaleString('vi-VN')}đ* cho *${serviceName}*.\n\n` +
+              `⚠️ *THÔNG BÁO TỪ NGƯỜI DUYỆT (${safeCollectorTag})*\n\n` +
+              `${safeTag} ơi, Người duyệt kiểm tra tài khoản nhưng *chưa thấy* khoản chuyển *${amount.toLocaleString('vi-VN')}đ* cho *${safeServiceName}*.\n\n` +
               `👉 _Bạn vui lòng kiểm tra lại trạng thái chuyển khoản trên App ngân hàng hoặc gửi ảnh biên lai nhé!_`;
 
             await this.sendMessage(groupObj.chatId, rejectMsg, groupObj.threadId);
           }
         }
 
-        await ctx.answerCallbackQuery({ text: `❌ Đã từ chối xác nhận cho ${memberName}!` });
+        try {
+          await ctx.answerCallbackQuery({ text: `❌ Đã từ chối xác nhận cho ${memberName}!` });
+        } catch (e) {}
         return;
       }
 
@@ -1588,7 +1693,7 @@ export class TelegramBotService {
       } catch (mdErr: any) {
         console.warn(`⚠️ Lỗi Markdown parse, đang fallback gửi text thường tới ${chatId}:`, mdErr?.message);
         delete options.parse_mode;
-        const sent = await this.bot.api.sendMessage(chatId, messageText.replace(/[*_`]/g, ''), options);
+        const sent = await this.bot.api.sendMessage(chatId, messageText.replace(/[*_`\\]/g, ''), options);
         return { success: true, messageId: sent.message_id };
       }
     } catch (error: any) {
@@ -1628,12 +1733,24 @@ export class TelegramBotService {
         } catch (photoErr) {
           console.warn('⚠️ Không thể gửi ảnh QR trực tiếp, chuyển sang gửi tin nhắn văn bản kèm link:', photoErr);
           const fallbackText = `${messageText}\n\n🖼 [Bấm vào đây để xem mã VietQR](${qrImageUrl})`;
-          const sent = await this.bot.api.sendMessage(chatId, fallbackText, options);
-          return { success: true, messageId: sent.message_id };
+          try {
+            const sent = await this.bot.api.sendMessage(chatId, fallbackText, options);
+            return { success: true, messageId: sent.message_id };
+          } catch (mdFallbackErr) {
+            delete options.parse_mode;
+            const sent = await this.bot.api.sendMessage(chatId, `${messageText.replace(/[*_`\\]/g, '')}\n\n🖼 Xem mã VietQR: ${qrImageUrl}`, options);
+            return { success: true, messageId: sent.message_id };
+          }
         }
       } else {
-        const sent = await this.bot.api.sendMessage(chatId, messageText, options);
-        return { success: true, messageId: sent.message_id };
+        try {
+          const sent = await this.bot.api.sendMessage(chatId, messageText, options);
+          return { success: true, messageId: sent.message_id };
+        } catch (mdErr) {
+          delete options.parse_mode;
+          const sent = await this.bot.api.sendMessage(chatId, messageText.replace(/[*_`\\]/g, ''), options);
+          return { success: true, messageId: sent.message_id };
+        }
       }
     } catch (error: any) {
       console.error(`❌ Lỗi gửi tin nhắn Telegram tới ${chatId}:`, error);
@@ -1659,8 +1776,15 @@ export class TelegramBotService {
       if (threadId) {
         options.message_thread_id = threadId;
       }
-      await this.bot.api.sendMessage(chatId, messageText, options);
-      return true;
+      try {
+        await this.bot.api.sendMessage(chatId, messageText, options);
+        return true;
+      } catch (mdErr: any) {
+        console.warn(`⚠️ Lỗi Markdown parse trong sendPaymentSuccessNotification tới ${chatId}, fallback gửi text thường:`, mdErr?.message);
+        delete options.parse_mode;
+        await this.bot.api.sendMessage(chatId, messageText.replace(/[*_`\\]/g, ''), options);
+        return true;
+      }
     } catch (error) {
       console.error(`❌ Lỗi gửi thông báo thanh toán tới ${chatId}:`, error);
       return false;
@@ -1685,8 +1809,15 @@ export class TelegramBotService {
       if (threadId) {
         options.message_thread_id = threadId;
       }
-      await this.bot.api.sendMessage(chatId, messageText, options);
-      return true;
+      try {
+        await this.bot.api.sendMessage(chatId, messageText, options);
+        return true;
+      } catch (mdErr: any) {
+        console.warn(`⚠️ Lỗi Markdown parse trong sendMessage tới ${chatId}, fallback gửi text thường:`, mdErr?.message);
+        delete options.parse_mode;
+        await this.bot.api.sendMessage(chatId, messageText.replace(/[*_`\\]/g, ''), options);
+        return true;
+      }
     } catch (error) {
       console.error(`❌ Lỗi gửi tin nhắn tới ${chatId}:`, error);
       return false;
@@ -1709,8 +1840,14 @@ export class TelegramBotService {
     }
 
     try {
-      await this.bot.api.sendMessage(targetChatId, messageText, { parse_mode: 'Markdown' });
-      return true;
+      try {
+        await this.bot.api.sendMessage(targetChatId, messageText, { parse_mode: 'Markdown' });
+        return true;
+      } catch (mdErr: any) {
+        console.warn(`⚠️ Lỗi Markdown parse trong sendAdminAlert tới ${targetChatId}, fallback gửi text thường:`, mdErr?.message);
+        await this.bot.api.sendMessage(targetChatId, messageText.replace(/[*_`\\]/g, ''));
+        return true;
+      }
     } catch (error) {
       console.error(`❌ Lỗi gửi cảnh báo tới Admin (${targetChatId}):`, error);
       return false;
