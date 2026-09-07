@@ -36,6 +36,9 @@ export class TelegramBotService {
     if (config.BOT_TOKEN) {
       try {
         this.bot = new Bot(config.BOT_TOKEN);
+        this.bot.catch((err) => {
+          console.error('❌ [TELEGRAM BOT ERROR CAUGHT]:', err.error || err.message || err);
+        });
         this.setupCommands();
       } catch (error) {
         console.error('❌ Lỗi khởi tạo Telegram Bot:', error);
@@ -118,6 +121,70 @@ export class TelegramBotService {
       username: rawUsername || undefined,
       tag
     };
+  }
+
+  public escapeMarkdown(text: string): string {
+    if (!text) return '';
+    return text.replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, '\\$&');
+  }
+
+  private async safeSendQR(
+    ctx: any,
+    qrUrl: string,
+    caption: string,
+    replyMarkup: InlineKeyboard,
+    replyToMessageId?: number
+  ): Promise<number | undefined> {
+    const plainCaption = caption.replace(/[*_`\\]/g, '');
+
+    // 1. Thử gửi ảnh có caption Markdown
+    try {
+      const sent = await ctx.replyWithPhoto(qrUrl, {
+        caption,
+        parse_mode: 'Markdown',
+        reply_to_message_id: replyToMessageId,
+        reply_markup: replyMarkup
+      });
+      return sent?.message_id;
+    } catch (e1: any) {
+      console.warn('⚠️ Lỗi gửi ảnh QR dạng Markdown, thử gửi dạng text thường:', e1?.message);
+    }
+
+    // 2. Thử gửi ảnh có caption text thuần (không parse Markdown)
+    try {
+      const sent = await ctx.replyWithPhoto(qrUrl, {
+        caption: plainCaption,
+        reply_to_message_id: replyToMessageId,
+        reply_markup: replyMarkup
+      });
+      return sent?.message_id;
+    } catch (e2: any) {
+      console.warn('⚠️ Lỗi gửi ảnh QR trực tiếp, fallback sang gửi link ảnh:', e2?.message);
+    }
+
+    // 3. Fallback gửi link Markdown
+    try {
+      const sent = await ctx.reply(`${caption}\n\n🖼 [Bấm vào đây để xem mã VietQR](${qrUrl})`, {
+        parse_mode: 'Markdown',
+        reply_to_message_id: replyToMessageId,
+        reply_markup: replyMarkup
+      });
+      return sent?.message_id;
+    } catch (e3: any) {
+      console.warn('⚠️ Lỗi gửi link Markdown, gửi tin nhắn thường:', e3?.message);
+    }
+
+    // 4. Fallback gửi text thường
+    try {
+      const sent = await ctx.reply(`${plainCaption}\n\n🖼 Xem mã VietQR: ${qrUrl}`, {
+        reply_to_message_id: replyToMessageId,
+        reply_markup: replyMarkup
+      });
+      return sent?.message_id;
+    } catch (e4: any) {
+      console.error('❌ Không thể gửi tin nhắn QR:', e4?.message);
+      return undefined;
+    }
   }
 
   public resolveMemberPaymentInfo(
@@ -507,19 +574,24 @@ export class TelegramBotService {
 
         const isSepayMode = svc.verificationMode === 'sepay';
         const serviceTitle = item.type === 'batch' && item.batch ? `${item.batch.title} (${svc.name})` : svc.name;
-        const mName = m.name;
-        const mTag = m.telegramUsername || targetUsername || '';
-        const memberTagDisplay = mTag ? `@${mTag}` : `*${mName}*`;
+        const mName = (m.name || '').replace(/[*_`]/g, '');
+        const mTag = (m.telegramUsername || targetUsername || '').replace(/^@/, '');
+        const escapedTag = this.escapeMarkdown(mTag);
+        const safeServiceTitle = serviceTitle.replace(/[*_`]/g, '');
+        const safeBankCode = (bankInfo.bankCode || '').replace(/[*_`]/g, '');
+        const safeAccountName = (bankInfo.accountName || '').replace(/[*_`]/g, '');
+        const safeAccountNumber = (bankInfo.accountNumber || '').replace(/[*_`]/g, '');
+        const safeTransferCode = fullTransferCode.replace(/[`\\]/g, '');
 
         let caption =
           `👤 *MÃ THANH TOÁN VIETQR: ${mName.toUpperCase()}*\n` +
-          `🏷️ Thành viên: ${memberTagDisplay}\n` +
-          `📦 Dịch vụ: *${serviceTitle}*\n` +
+          (escapedTag ? `🏷️ Tag: @${escapedTag}\n` : '') +
+          `📦 Dịch vụ: *${safeServiceTitle}*\n` +
           `💰 Số tiền: *${item.amount.toLocaleString('vi-VN')}đ*\n` +
-          `📝 Nội dung CK: \`${fullTransferCode}\`\n` +
-          `🏦 Ngân hàng: *${bankInfo.bankCode}*\n` +
-          `💳 STK: \`${bankInfo.accountNumber}\`\n` +
-          `👤 Chủ TK: *${bankInfo.accountName}*\n\n`;
+          `📝 Nội dung CK: \`${safeTransferCode}\`\n` +
+          `🏦 Ngân hàng: *${safeBankCode}*\n` +
+          `💳 STK: \`${safeAccountNumber}\`\n` +
+          `👤 Chủ TK: *${safeAccountName}*\n\n`;
 
         if (item.status === 'pending_verify') {
           caption += `⏳ *Trạng thái:* Đang chờ Trưởng nhóm duyệt xác nhận!\n\n`;
@@ -536,23 +608,13 @@ export class TelegramBotService {
 
         const replyMarkup = new InlineKeyboard().text('📩 Tôi Đã Chuyển Tiền Xong', selfPayCallback);
 
-        let sentMessageId: number | undefined;
-        try {
-          const sent = await ctx.replyWithPhoto(qrUrl, {
-            caption,
-            parse_mode: 'Markdown',
-            reply_to_message_id: ctx.message?.message_id,
-            reply_markup: replyMarkup
-          });
-          sentMessageId = sent.message_id;
-        } catch {
-          const sent = await ctx.reply(`${caption}\n\n🖼 [Bấm vào đây để xem mã VietQR](${qrUrl})`, {
-            parse_mode: 'Markdown',
-            reply_to_message_id: ctx.message?.message_id,
-            reply_markup: replyMarkup
-          });
-          sentMessageId = sent.message_id;
-        }
+        const sentMessageId = await this.safeSendQR(
+          ctx,
+          qrUrl,
+          caption,
+          replyMarkup,
+          ctx.message?.message_id
+        );
 
         // Lưu qrMessageId để tự động xóa khi đã xác nhận thanh toán
         if (sentMessageId) {
@@ -865,15 +927,24 @@ export class TelegramBotService {
           });
 
           const isSepayMode = currentService?.verificationMode === 'sepay';
+          const safeMemberName = (memberName || '').replace(/[*_`]/g, '');
+          const safeMemberTag = (memberTag || '').replace(/^@/, '');
+          const escapedTag = this.escapeMarkdown(safeMemberTag);
+          const safeServiceTitle = (serviceName || '').replace(/[*_`]/g, '');
+          const safeBankCode = (bankInfo.bankCode || '').replace(/[*_`]/g, '');
+          const safeAccountName = (bankInfo.accountName || '').replace(/[*_`]/g, '');
+          const safeAccountNumber = (bankInfo.accountNumber || '').replace(/[*_`]/g, '');
+          const safeTransferCode = fullTransferCode.replace(/[`\\]/g, '');
+
           const caption =
-            `👤 *MÃ THANH TOÁN VIETQR: ${memberName.toUpperCase()}*\n` +
-            (memberTag ? `🏷️ Tag: @${memberTag}\n` : '') +
-            `📦 Dịch vụ: *${serviceName}*\n` +
+            `👤 *MÃ THANH TOÁN VIETQR: ${safeMemberName.toUpperCase()}*\n` +
+            (escapedTag ? `🏷️ Tag: @${escapedTag}\n` : '') +
+            `📦 Dịch vụ: *${safeServiceTitle}*\n` +
             `💰 Số tiền: *${amount.toLocaleString('vi-VN')}đ*\n` +
-            `📝 Nội dung CK: \`${fullTransferCode}\`\n` +
-            `🏦 Ngân hàng: *${bankInfo.bankCode}*\n` +
-            `💳 STK: \`${bankInfo.accountNumber}\`\n` +
-            `👤 Chủ TK: *${bankInfo.accountName}*\n\n` +
+            `📝 Nội dung CK: \`${safeTransferCode}\`\n` +
+            `🏦 Ngân hàng: *${safeBankCode}*\n` +
+            `💳 STK: \`${safeAccountNumber}\`\n` +
+            `👤 Chủ TK: *${safeAccountName}*\n\n` +
             (isSepayMode
               ? `⚡ _Mã QR đã có sẵn số tiền & nội dung chính xác. Sau khi chuyển khoản, SePay sẽ tự động đối soát và xác nhận trong 5-30 giây!_`
               : `⚡ _Quét mã bằng App ngân hàng để thanh toán, sau khi CK xong bấm nút bên dưới để báo Trưởng nhóm duyệt:_`);
@@ -884,27 +955,15 @@ export class TelegramBotService {
             : `self_pay_svc:${data.split(':')[1]}:${data.split(':')[2]}`;
 
           const replyMarkup = new InlineKeyboard().text('📩 Tôi Đã Chuyển Tiền Xong', selfPayCallback);
-
-
-          let sentMessageId: number | undefined;
           const chatId = String(ctx.chat?.id || ctx.callbackQuery.message?.chat.id || '');
 
-          try {
-            const sent = await ctx.replyWithPhoto(qrUrl, {
-              caption,
-              parse_mode: 'Markdown',
-              reply_to_message_id: ctx.callbackQuery.message?.message_id,
-              reply_markup: replyMarkup
-            });
-            sentMessageId = sent.message_id;
-          } catch (photoErr) {
-            const sent = await ctx.reply(`${caption}\n\n🖼 [Bấm vào đây để xem mã VietQR](${qrUrl})`, {
-              parse_mode: 'Markdown',
-              reply_to_message_id: ctx.callbackQuery.message?.message_id,
-              reply_markup: replyMarkup
-            });
-            sentMessageId = sent.message_id;
-          }
+          const sentMessageId = await this.safeSendQR(
+            ctx,
+            qrUrl,
+            caption,
+            replyMarkup,
+            ctx.callbackQuery.message?.message_id
+          );
 
           // Lưu qrMessageId để tự động xóa khi thành viên này chuyển khoản xong
           if (sentMessageId && chatId) {
