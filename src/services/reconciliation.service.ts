@@ -312,6 +312,12 @@ export class ReconciliationService {
       await this.telegram.sendPaymentSuccessNotification(match.group.chatId, notifyMsg, match.group.threadId);
       console.log(`✅ Đã đối soát thành công giao dịch ${transaction.id} cho thành viên ${match.member.name}`);
 
+      // Làm mới thông báo thu tiền trong nhóm (xóa tin nhắn cũ, gửi danh sách mới chỉ còn người chưa nộp)
+      await this.telegram.refreshGroupPaymentAnnouncement({
+        serviceId: match.service.id,
+        groupId: match.group.id
+      });
+
       // Nếu đợt thu này đã hoàn tất 100%, gửi thêm tin nhắn chúc mừng/thông báo thu đủ
       if (celebrationPayload) {
         const p = celebrationPayload as { group: Group; batchTitle: string; totalAmount: number; count: number };
@@ -468,6 +474,10 @@ export class ReconciliationService {
         `❤️ _Cảm ơn tất cả mọi người đã hoàn tất đóng tiền đầy đủ và đúng hạn!_ 🚀`;
       await this.telegram.sendMessage(p.group.chatId, celebrationMsg, p.group.threadId);
     }
+
+    await this.telegram.refreshGroupPaymentAnnouncement({
+      serviceId
+    });
 
     return updatedTx!;
   }

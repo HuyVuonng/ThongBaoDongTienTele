@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { TelegramBotService } from '../src/bot/telegram.js';
 import { Service, Group, AppState } from '../src/types.js';
 
@@ -395,3 +395,271 @@ describe('TelegramBotService /guitien and Member Payment Resolution Tests', () =
     expect(result.safeTag).toBe('@lead\\_boss\\_99');
   });
 });
+
+describe('TelegramBotService refreshGroupPaymentAnnouncement Tests', () => {
+  const telegramService = TelegramBotService.getInstance();
+  const store = (telegramService as any).store;
+
+  const testGroup: Group = {
+    id: 'grp-refresh-1',
+    chatId: '-100888777666',
+    title: 'Nhóm Test Refresh',
+    active: true,
+    createdAt: '',
+    updatedAt: ''
+  };
+
+  const testService: Service = {
+    id: 'svc-refresh-1',
+    groupId: 'grp-refresh-1',
+    name: 'Netflix Family',
+    scheduleType: 'monthly',
+    mode: 'per_member',
+    totalAmount: 200000,
+    defaultAmountPerMember: 100000,
+    transferPrefix: 'NET',
+    bankInfo: {
+      bankCode: 'MB',
+      accountNumber: '123456789',
+      accountName: 'TEST ADMIN'
+    },
+    messageTemplate: '',
+    active: true,
+    createdAt: '',
+    updatedAt: ''
+  };
+
+  beforeEach(async () => {
+    await store.update((s: AppState) => {
+      s.groups = (s.groups || []).filter(g => g.id !== 'grp-refresh-1' && g.id !== 'grp-by-svc-1');
+      s.services = (s.services || []).filter(svc => svc.id !== 'svc-refresh-1' && svc.id !== 'svc-by-svc-1');
+      s.expenseBatches = (s.expenseBatches || []).filter(b => !b.id.startsWith('batch-refresh-') && !b.id.startsWith('batch-by-service-'));
+    });
+  });
+
+  it('nên xóa tin nhắn cũ và gửi thông báo mới chỉ còn thành viên chưa nộp tiền', async () => {
+    const deletedMessages: { chatId: string; messageId: number }[] = [];
+    const sentMessagesWithButtons: any[] = [];
+    const celebrationMessages: any[] = [];
+
+    telegramService.deleteMessage = async (chatId: string, messageId: number) => {
+      deletedMessages.push({ chatId, messageId });
+      return true;
+    };
+
+    telegramService.sendMessageWithButtons = async (chatId: string, messageText: string, buttons: any[], threadId?: number) => {
+      sentMessagesWithButtons.push({ chatId, messageText, buttons, threadId });
+      return { success: true, messageId: 999111 };
+    };
+
+    telegramService.sendMessage = async (chatId: string, messageText: string, threadId?: number) => {
+      celebrationMessages.push({ chatId, messageText, threadId });
+      return true;
+    };
+
+    await store.update((s: AppState) => {
+      s.groups.push(testGroup);
+      s.services.push(testService);
+      if (!s.expenseBatches) s.expenseBatches = [];
+      s.expenseBatches.push({
+        id: 'batch-refresh-1',
+        serviceId: 'svc-refresh-1',
+        groupId: 'grp-refresh-1',
+        title: 'Netflix Tháng 09/2026',
+        totalAmount: 200000,
+        messageId: 555666,
+        status: 'active',
+        sentAt: new Date().toISOString(),
+        members: [
+          {
+            memberId: 'mem-1',
+            name: 'Nguyen Van A',
+            telegramUsername: 'user_a',
+            transferCode: 'NET-A',
+            amount: 100000,
+            status: 'paid'
+          },
+          {
+            memberId: 'mem-2',
+            name: 'Tran Thi B',
+            telegramUsername: 'user_b',
+            transferCode: 'NET-B',
+            amount: 100000,
+            status: 'unpaid'
+          }
+        ]
+      });
+    });
+
+    const result = await telegramService.refreshGroupPaymentAnnouncement({
+      batchId: 'batch-refresh-1'
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.completed).toBe(false);
+    expect(result.messageId).toBe(999111);
+
+    // Kiểm tra tin nhắn cũ bị xóa
+    expect(deletedMessages.some(d => d.chatId === '-100888777666' && d.messageId === 555666)).toBe(true);
+
+    // Kiểm tra thông báo mới chỉ còn 1 nút bấm cho Tran Thi B (người chưa nộp)
+    expect(sentMessagesWithButtons).toHaveLength(1);
+    const lastSent = sentMessagesWithButtons[0];
+    expect(lastSent.buttons).toHaveLength(1);
+    expect(lastSent.buttons[0].text).toContain('Tran Thi B');
+    expect(lastSent.buttons[0].callbackData).toBe('pay_batch:batch-refresh-1:mem-2');
+
+    // Kiểm tra state đã được cập nhật messageId mới
+    const stateAfter = await store.read();
+    const batchAfter = (stateAfter.expenseBatches || []).find((b: ExpenseBatch) => b.id === 'batch-refresh-1');
+    expect(batchAfter?.messageId).toBe(999111);
+  });
+
+  it('khi tất cả thành viên đã nộp đủ 100%, nên chuyển đợt thu sang completed và gửi thông báo chúc mừng', async () => {
+    const celebrationMessages: any[] = [];
+    telegramService.sendMessage = async (chatId: string, messageText: string, threadId?: number) => {
+      celebrationMessages.push({ chatId, messageText, threadId });
+      return true;
+    };
+
+    telegramService.deleteMessage = async () => true;
+
+    await store.update((s: AppState) => {
+      s.groups.push(testGroup);
+      s.services.push(testService);
+      if (!s.expenseBatches) s.expenseBatches = [];
+      s.expenseBatches.push({
+        id: 'batch-refresh-completed',
+        serviceId: 'svc-refresh-1',
+        groupId: 'grp-refresh-1',
+        title: 'Netflix Đã Thu Đủ',
+        totalAmount: 200000,
+        status: 'active',
+        sentAt: new Date().toISOString(),
+        members: [
+          {
+            memberId: 'mem-1',
+            name: 'Nguyen Van A',
+            telegramUsername: 'user_a',
+            transferCode: 'NET-A',
+            amount: 100000,
+            status: 'paid'
+          },
+          {
+            memberId: 'mem-2',
+            name: 'Tran Thi B',
+            telegramUsername: 'user_b',
+            transferCode: 'NET-B',
+            amount: 100000,
+            status: 'paid'
+          }
+        ]
+      });
+    });
+
+    const result = await telegramService.refreshGroupPaymentAnnouncement({
+      batchId: 'batch-refresh-completed'
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.completed).toBe(true);
+
+    // Kiểm tra state đợt thu đã chuyển sang completed
+    const stateAfter = await store.read();
+    const batchAfter = (stateAfter.expenseBatches || []).find((b: ExpenseBatch) => b.id === 'batch-refresh-completed');
+    expect(batchAfter?.status).toBe('completed');
+    expect(batchAfter?.completedNotificationSent).toBe(true);
+    expect(batchAfter?.completedAt).toBeDefined();
+
+    // Kiểm tra tin nhắn chúc mừng đã được gửi vào nhóm
+    expect(celebrationMessages).toHaveLength(1);
+    expect(celebrationMessages[0].messageText).toContain('TẤT CẢ THÀNH VIÊN ĐÃ HOÀN TẤT ĐÓNG TIỀN');
+    expect(celebrationMessages[0].chatId).toBe('-100888777666');
+  });
+
+  it('nên tự động tìm đúng batch theo serviceId khi không truyền batchId trực tiếp', async () => {
+    const deletedMessages: { chatId: string; messageId: number }[] = [];
+    const sentMessagesWithButtons: any[] = [];
+
+    telegramService.deleteMessage = async (chatId: string, messageId: number) => {
+      deletedMessages.push({ chatId, messageId });
+      return true;
+    };
+
+    telegramService.sendMessageWithButtons = async (chatId: string, messageText: string, buttons: any[], threadId?: number) => {
+      sentMessagesWithButtons.push({ chatId, messageText, buttons, threadId });
+      return { success: true, messageId: 999222 };
+    };
+
+    const now = new Date();
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+    const testGroup2: Group = {
+      id: 'grp-by-svc-1',
+      chatId: '-100999888777',
+      title: 'Nhóm By Svc',
+      active: true,
+      createdAt: '',
+      updatedAt: ''
+    };
+
+    const testService2: Service = {
+      id: 'svc-by-svc-1',
+      groupId: 'grp-by-svc-1',
+      name: 'Spotify By Svc',
+      scheduleType: 'monthly',
+      mode: 'per_member',
+      totalAmount: 150000,
+      bankInfo: {
+        bankCode: 'MB',
+        accountNumber: '123456789',
+        accountName: 'TEST ADMIN'
+      },
+      messageTemplate: '',
+      active: true,
+      createdAt: '',
+      updatedAt: ''
+    };
+
+    await store.update((s: AppState) => {
+      s.groups.push(testGroup2);
+      s.services.push(testService2);
+      if (!s.expenseBatches) s.expenseBatches = [];
+      s.expenseBatches.push({
+        id: 'batch-by-service-1',
+        serviceId: 'svc-by-svc-1',
+        groupId: 'grp-by-svc-1',
+        title: 'Spotify Active Batch',
+        month: currentMonth,
+        totalAmount: 150000,
+        messageId: 777888,
+        status: 'active',
+        sentAt: new Date().toISOString(),
+        members: [
+          {
+            memberId: 'mem-1',
+            name: 'Nguyen Van A',
+            telegramUsername: 'user_a',
+            transferCode: 'SP-A',
+            amount: 150000,
+            status: 'unpaid'
+          }
+        ]
+      });
+    });
+
+    const result = await telegramService.refreshGroupPaymentAnnouncement({
+      serviceId: 'svc-by-svc-1'
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.completed).toBe(false);
+    expect(result.messageId).toBe(999222);
+
+    // Kiểm tra tin nhắn cũ bị xóa
+    expect(deletedMessages.some(d => d.chatId === '-100999888777' && d.messageId === 777888)).toBe(true);
+    expect(sentMessagesWithButtons).toHaveLength(1);
+  });
+});
+
+

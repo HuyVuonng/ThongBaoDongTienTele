@@ -605,7 +605,9 @@ apiRouter.get('/services/:serviceId/batches/:batchId', async (req: Request, res:
 // Chuyển đổi trạng thái đóng tiền của thành viên trong một đợt cụ thể
 apiRouter.post('/services/:serviceId/batches/:batchId/members/:memberId/toggle-paid', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { serviceId, batchId, memberId } = req.params;
+    const serviceId = req.params.serviceId as string;
+    const batchId = req.params.batchId as string;
+    const memberId = req.params.memberId as string;
     let newStatus: string = 'paid';
     let celebrationPayload: { group: Group; batchTitle: string; totalAmount: number; count: number } | null = null;
 
@@ -657,6 +659,35 @@ apiRouter.post('/services/:serviceId/batches/:batchId/members/:memberId/toggle-p
           }
         }
       }
+
+      // Đồng bộ sang monthlyPayments
+      const now = new Date();
+      const targetMonth = batch.month || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      let p = s.monthlyPayments.find(pay => pay.serviceId === serviceId && pay.memberId === memberId && pay.month === targetMonth);
+      if (newStatus === 'paid') {
+        if (!p) {
+          s.monthlyPayments.push({
+            memberId,
+            serviceId,
+            month: targetMonth,
+            expectedAmount: memItem.amount,
+            paidAmount: memItem.amount,
+            status: 'paid',
+            transactionIds: [],
+            paidAt: new Date().toISOString()
+          });
+        } else {
+          p.paidAmount = memItem.amount;
+          p.status = 'paid';
+          p.paidAt = new Date().toISOString();
+        }
+      } else {
+        if (p) {
+          p.status = 'unpaid';
+          p.paidAmount = 0;
+          p.paidAt = undefined;
+        }
+      }
     });
 
     // Nếu kích hoạt hoàn tất 100%, gửi thông báo Telegram vào nhóm
@@ -670,6 +701,12 @@ apiRouter.post('/services/:serviceId/batches/:batchId/members/:memberId/toggle-p
         `❤️ _Cảm ơn tất cả mọi người đã hoàn tất đóng tiền đầy đủ và đúng hạn!_ 🚀`;
       await telegramService.sendMessage(p.group.chatId, celebrationMsg, p.group.threadId);
     }
+
+    // Làm mới thông báo thu tiền trong nhóm Telegram
+    await telegramService.refreshGroupPaymentAnnouncement({
+      serviceId,
+      batchId
+    });
 
     res.json({ success: true, status: newStatus, batchId, memberId });
   } catch (error: any) {
@@ -927,6 +964,42 @@ apiRouter.post('/services/:serviceId/members/:memberId/toggle-paid', async (req:
           newStatus = 'paid';
         }
       }
+
+      // Đồng bộ sang các đợt thu (expenseBatches) liên quan
+      for (const batch of (s.expenseBatches || [])) {
+        if (batch.serviceId === serviceId && (batch.month === targetMonth || batch.status === 'active')) {
+          const bm = batch.members.find(m => m.memberId === memberId);
+          if (bm) {
+            if (newStatus === 'paid') {
+              bm.status = 'paid';
+              bm.paidAmount = bm.amount;
+              bm.paidAt = new Date().toISOString();
+              if (bm.qrMessageId && bm.qrChatId) {
+                telegramService.deleteMessage(bm.qrChatId, bm.qrMessageId).catch(() => {});
+                bm.qrMessageId = undefined;
+              }
+            } else {
+              bm.status = 'unpaid';
+              bm.paidAmount = 0;
+              bm.paidAt = undefined;
+              batch.status = 'active';
+              batch.completedAt = undefined;
+              batch.completedNotificationSent = false;
+            }
+          }
+          const isAllPaid = batch.members.length > 0 && batch.members.every(m => m.status === 'paid');
+          if (isAllPaid && !batch.completedNotificationSent) {
+            batch.status = 'completed';
+            batch.completedAt = new Date().toISOString();
+            batch.completedNotificationSent = true;
+          }
+        }
+      }
+    });
+
+    // Làm mới thông báo thu tiền trong nhóm Telegram
+    await telegramService.refreshGroupPaymentAnnouncement({
+      serviceId
     });
 
     res.json({ success: true, status: newStatus, month: targetMonth });

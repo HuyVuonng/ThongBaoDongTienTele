@@ -86,11 +86,49 @@ function showLogin() {
   lucide.createIcons();
 }
 
+let autoRefreshTimer = null;
+
+function refreshCurrentTab(isBackground = false) {
+  if (!currentUser) return;
+  const tabId = state.currentTab || "overview";
+  if (tabId === "overview") {
+    loadOverviewSummary();
+  } else if (tabId === "members" && state.currentServiceForMembers) {
+    loadMembersForSelectedService(true);
+  } else if (tabId === "groups-services") {
+    loadGroupsAndServices();
+  } else if (tabId === "transactions") {
+    loadTransactions();
+  }
+}
+
+function startAutoRefresh() {
+  if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+  autoRefreshTimer = setInterval(() => {
+    if (!document.hidden && currentUser) {
+      refreshCurrentTab(true);
+    }
+  }, 4000);
+}
+
+window.addEventListener("focus", () => {
+  if (currentUser) {
+    refreshCurrentTab(false);
+  }
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && currentUser) {
+    refreshCurrentTab(false);
+  }
+});
+
 function showApp() {
   document.getElementById("loginScreen").style.display = "none";
   document.getElementById("appScreen").style.display = "flex";
   renderUserProfile();
   loadDashboardData();
+  startAutoRefresh();
   lucide.createIcons();
 }
 

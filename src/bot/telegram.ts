@@ -734,6 +734,9 @@ export class TelegramBotService {
 
       // Cập nhật trạng thái
       await this.store.update(s => {
+        let qrMsgId: number | undefined;
+        let qrChatId: string | undefined;
+
         let payment = s.monthlyPayments.find(p => p.serviceId === targetService!.id && p.memberId === matchedMember.id && p.month === currentMonth);
         if (!payment) {
           payment = {
@@ -751,21 +754,32 @@ export class TelegramBotService {
           payment.paidAmount = amount;
           payment.status = 'paid';
           payment.paidAt = new Date().toISOString();
+          if (payment.qrMessageId && payment.qrChatId) {
+            qrMsgId = payment.qrMessageId;
+            qrChatId = payment.qrChatId;
+            payment.qrMessageId = undefined;
+          }
         }
 
         // Cập nhật đợt thu nếu có
         for (const batch of (s.expenseBatches || [])) {
-          if (batch.serviceId === targetService!.id && batch.status === 'active') {
+          if (batch.serviceId === targetService!.id && (batch.status === 'active' || batch.month === currentMonth)) {
             const bm = batch.members.find(m => m.memberId === matchedMember.id);
             if (bm) {
               bm.status = 'paid';
               bm.paidAmount = amount;
               bm.paidAt = new Date().toISOString();
               if (bm.qrMessageId && bm.qrChatId) {
-                this.deleteMessage(bm.qrChatId, bm.qrMessageId).catch(() => {});
+                qrMsgId = bm.qrMessageId;
+                qrChatId = bm.qrChatId;
+                bm.qrMessageId = undefined;
               }
             }
           }
+        }
+
+        if (qrMsgId && qrChatId) {
+          this.deleteMessage(qrChatId, qrMsgId).catch(() => {});
         }
       });
 
@@ -783,6 +797,11 @@ export class TelegramBotService {
       } catch (e) {
         await ctx.reply(successReply.replace(/[*_`\\]/g, ''));
       }
+
+      await this.refreshGroupPaymentAnnouncement({
+        serviceId: targetService.id,
+        groupId: group.id
+      });
     });
 
     // Lệnh /chatid
@@ -1092,6 +1111,27 @@ export class TelegramBotService {
             const b = (s.expenseBatches || []).find(b => b.id === targetId);
             const m = b?.members.find(m => m.memberId === memberId);
             if (m) m.status = 'pending_verify';
+
+            // Đồng bộ sang monthlyPayments để hiển thị tức thì trên Web Dashboard
+            const targetServiceId = b?.serviceId || serviceId;
+            const now = new Date();
+            const targetMonth = b?.month || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+            if (targetServiceId) {
+              let p = s.monthlyPayments.find(pay => pay.serviceId === targetServiceId && pay.memberId === memberId && pay.month === targetMonth);
+              if (!p) {
+                s.monthlyPayments.push({
+                  memberId,
+                  serviceId: targetServiceId,
+                  month: targetMonth,
+                  expectedAmount: amount,
+                  paidAmount: 0,
+                  status: 'pending_verify',
+                  transactionIds: []
+                });
+              } else if (p.status !== 'paid') {
+                p.status = 'pending_verify';
+              }
+            }
           });
         } else {
           const service = state.services.find(s => s.id === targetId);
@@ -1136,8 +1176,18 @@ export class TelegramBotService {
                 status: 'pending_verify',
                 transactionIds: []
               });
-            } else {
+            } else if (p.status !== 'paid') {
               p.status = 'pending_verify';
+            }
+
+            // Đồng bộ sang expenseBatches tương ứng
+            for (const batch of (s.expenseBatches || [])) {
+              if (batch.serviceId === targetId && (batch.month === currentMonth || batch.status === 'active')) {
+                const bm = batch.members.find(m => m.memberId === memberId);
+                if (bm && bm.status !== 'paid') {
+                  bm.status = 'pending_verify';
+                }
+              }
             }
           });
         }
@@ -1232,12 +1282,11 @@ export class TelegramBotService {
             );
           }
         } else {
-          // CHẾ ĐỘ HYBRID: Nếu chưa có Chat ID riêng hoặc gửi DM thất bại -> Gửi thông báo kèm nút duyệt trực tiếp vào nhóm và Tag @username
+          // CHẾ ĐỘ FALLBACK: Nếu không gửi được DM riêng (hoặc Trưởng nhóm chưa /start với bot), gửi tin nhắn tag trực tiếp vào nhóm
           const verifyTextGroup =
-            `🔔 *YÊU CẦU XÁC NHẬN CHUYỂN KHOẢN (DUYỆT TIỀN)*\n\n` +
-            `👑 Người duyệt: ${safeCollectorTag}\n` +
+            `🔔 *YÊU CẦU XÁC NHẬN CHUYỂN KHOẢN*\n\n` +
             `👤 Thành viên: ${safeTag} (\`${safeMemberName}\`)\n` +
-            `📦 Dịch vụ / Đợt thu: *${safeServiceName}*\n` +
+            `📦 Dịch vụ: *${safeServiceName}*\n` +
             `💰 Số tiền: *${amount.toLocaleString('vi-VN')}đ*\n` +
             `📝 Nội dung CK: \`${safeTransferCode}\`\n` +
             `⏰ Thời gian: ${new Date().toLocaleTimeString('vi-VN')} ${new Date().toLocaleDateString('vi-VN')}\n\n` +
@@ -1285,13 +1334,14 @@ export class TelegramBotService {
         const fromId = String(ctx.from?.id);
         const fromUsername = (ctx.from?.username || '').toLowerCase().trim();
 
-        const serviceObj = isBatch 
-          ? state.services.find(s => s.id === (state.expenseBatches || []).find(b => b.id === targetId)?.serviceId)
-          : state.services.find(s => s.id === targetId);
-        const groupObj = isBatch
-          ? state.groups.find(g => g.id === (state.expenseBatches || []).find(b => b.id === targetId)?.groupId || g.id === serviceObj?.groupId)
-          : state.groups.find(g => g.id === serviceObj?.groupId);
+        // Tìm Batch (nếu có) và Service liên quan
+        let matchedBatch = (state.expenseBatches || []).find(b => b.id === targetId);
+        if (!matchedBatch) {
+          matchedBatch = (state.expenseBatches || []).find(b => b.serviceId === targetId && b.members.some(m => m.memberId === memberId));
+        }
 
+        const serviceObj = state.services.find(s => s.id === (matchedBatch?.serviceId || targetId));
+        const groupObj = state.groups.find(g => g.id === (matchedBatch?.groupId || serviceObj?.groupId));
         const collector = this.resolveCollector(serviceObj, groupObj, state);
 
         // Phân quyền nếu bấm trong nhóm chung
@@ -1323,78 +1373,81 @@ export class TelegramBotService {
 
         let memberName = '';
         let memberTag = '';
-        let serviceName = '';
+        let serviceName = serviceObj?.name || matchedBatch?.title || '';
         let amount = 0;
         let qrMsgId: number | undefined;
         let qrChatId: string | undefined;
         let isAllCompleted = false;
 
-        if (isBatch) {
-          const batch = (state.expenseBatches || []).find(b => b.id === targetId);
-          const memberItem = batch?.members.find(m => m.memberId === memberId);
+        const now = new Date();
+        const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const targetMonth = matchedBatch?.month || currentMonth;
 
-          if (batch && memberItem) {
-            memberName = memberItem.name;
-            memberTag = memberItem.telegramUsername || '';
-            serviceName = batch.title;
-            amount = memberItem.amount;
-            qrMsgId = memberItem.qrMessageId;
-            qrChatId = memberItem.qrChatId;
+        const baseMember = (state.members[serviceObj?.id || ''] || []).find(m => m.id === memberId);
+        const batchMember = matchedBatch?.members.find(m => m.memberId === memberId);
 
-            await this.store.update(s => {
-              const b = (s.expenseBatches || []).find(b => b.id === targetId);
-              const m = b?.members.find(m => m.memberId === memberId);
-              if (m) {
-                m.status = 'paid';
-                m.paidAmount = amount;
-                m.paidAt = new Date().toISOString();
+        memberName = batchMember?.name || baseMember?.name || 'Thành viên';
+        memberTag = batchMember?.telegramUsername || baseMember?.telegramUsername || '';
+        amount = batchMember?.amount || (serviceObj && serviceObj.mode === 'per_member' && baseMember?.customAmount
+          ? baseMember.customAmount
+          : (serviceObj?.defaultAmountPerMember || Math.round((serviceObj?.totalAmount || 0) / (state.members[serviceObj?.id || '']?.length || 1))));
+
+        await this.store.update(s => {
+          const paidTime = new Date().toISOString();
+
+          // 1. Cập nhật trong TẤT CẢ expenseBatches phù hợp
+          for (const b of (s.expenseBatches || [])) {
+            if (b.id === matchedBatch?.id || (serviceObj && b.serviceId === serviceObj.id && (b.month === targetMonth || b.status === 'active'))) {
+              const bm = b.members.find(m => m.memberId === memberId);
+              if (bm) {
+                bm.status = 'paid';
+                bm.paidAmount = bm.amount || amount;
+                bm.paidAt = paidTime;
+                if (bm.qrMessageId && bm.qrChatId) {
+                  qrMsgId = bm.qrMessageId;
+                  qrChatId = bm.qrChatId;
+                  this.deleteMessage(bm.qrChatId, bm.qrMessageId).catch(() => {});
+                  bm.qrMessageId = undefined;
+                }
               }
-              const allPaid = b?.members.every(mem => mem.status === 'paid');
-              if (allPaid && b && !b.completedNotificationSent) {
+              const allPaid = b.members.length > 0 && b.members.every(m => m.status === 'paid');
+              if (allPaid && !b.completedNotificationSent) {
                 b.status = 'completed';
-                b.completedAt = new Date().toISOString();
+                b.completedAt = paidTime;
                 b.completedNotificationSent = true;
                 isAllCompleted = true;
               }
-            });
+            }
           }
-        } else {
-          const service = state.services.find(s => s.id === targetId);
-          const member = (state.members[targetId] || []).find(m => m.id === memberId);
-          const now = new Date();
-          const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-          if (service && member) {
-            memberName = member.name;
-            memberTag = member.telegramUsername || '';
-            serviceName = service.name;
-            amount = service.mode === 'per_member' && member.customAmount
-              ? member.customAmount
-              : (service.defaultAmountPerMember || Math.round(service.totalAmount / (state.members[targetId]?.length || 1)));
-
-            await this.store.update(s => {
-              let p = s.monthlyPayments.find(pay => pay.serviceId === targetId && pay.memberId === memberId && pay.month === currentMonth);
-              if (!p) {
-                s.monthlyPayments.push({
-                  memberId: member.id,
-                  serviceId: targetId,
-                  month: currentMonth,
-                  expectedAmount: amount,
-                  paidAmount: amount,
-                  status: 'paid',
-                  transactionIds: [],
-                  paidAt: new Date().toISOString()
-                });
-              } else {
+          // 2. Đồng bộ sang monthlyPayments
+          const targetSvcId = serviceObj?.id || matchedBatch?.serviceId;
+          if (targetSvcId) {
+            let p = s.monthlyPayments.find(pay => pay.serviceId === targetSvcId && pay.memberId === memberId && pay.month === targetMonth);
+            if (!p) {
+              s.monthlyPayments.push({
+                memberId,
+                serviceId: targetSvcId,
+                month: targetMonth,
+                expectedAmount: amount,
+                paidAmount: amount,
+                status: 'paid',
+                transactionIds: [],
+                paidAt: paidTime
+              });
+            } else {
+              p.paidAmount = amount;
+              p.status = 'paid';
+              p.paidAt = paidTime;
+              if (p.qrMessageId && p.qrChatId) {
                 qrMsgId = p.qrMessageId;
                 qrChatId = p.qrChatId;
-                p.paidAmount = amount;
-                p.status = 'paid';
-                p.paidAt = new Date().toISOString();
+                this.deleteMessage(p.qrChatId, p.qrMessageId).catch(() => {});
+                p.qrMessageId = undefined;
               }
-            });
+            }
           }
-        }
+        });
 
         const rawMemberTag = (memberTag || '').replace(/^@/, '').trim();
         const safeTag = this.formatTag(rawMemberTag, memberName);
@@ -1404,7 +1457,7 @@ export class TelegramBotService {
         const safeApproverTag = this.formatTag(rawApproverTag, ctx.from?.first_name || 'Trưởng nhóm');
         const safeCollectorTag = collector.safeTag;
 
-        // Cập nhật lại tin nhắn hiển thị (bỏ nút bấm)
+        // Cập nhật lại tin nhắn hiển thị duyệt tiền (bỏ nút bấm)
         if (isGroupChat) {
           const groupApprovedMsg =
             `✅ *ĐÃ XÁC NHẬN THANH TOÁN THÀNH CÔNG*\n\n` +
@@ -1429,7 +1482,7 @@ export class TelegramBotService {
             `💰 Số tiền: *${amount.toLocaleString('vi-VN')}đ*\n` +
             `📦 Dịch vụ: *${safeServiceName}*\n` +
             `⏰ Lúc: ${new Date().toLocaleTimeString('vi-VN')}\n\n` +
-            `_Bot đã gửi thông báo xác nhận vào nhóm và cập nhật Dashboard._`;
+            `_Bot đã gửi thông báo xác nhận vào nhóm, cập nhật thông báo đóng tiền và Dashboard._`;
 
           try {
             await ctx.editMessageText(dmApprovedMsg, { parse_mode: 'Markdown' });
@@ -1459,14 +1512,13 @@ export class TelegramBotService {
           this.deleteMessage(qrChatId, qrMsgId).catch(() => {});
         }
 
-        if (isAllCompleted && groupObj) {
-          const safeBatchName = (serviceName || '').replace(/[*_`\\]/g, '');
-          const celebrationMsg =
-            `🎉 *TẤT CẢ THÀNH VIÊN ĐÃ HOÀN TẤT ĐÓNG TIỀN!* 🎉\n\n` +
-            `📦 Đợt thu: *${safeBatchName}*\n` +
-            `💰 Trạng thái: *100% thành viên đã hoàn thành*\n\n` +
-            `❤️ _Cảm ơn tất cả mọi người đã đóng tiền đầy đủ!_ 🚀`;
-          await this.sendMessage(groupObj.chatId, celebrationMsg, groupObj.threadId);
+        // TỰ ĐỘNG XÓA THÔNG BÁO ĐÓNG TIỀN CŨ VÀ GỬI LẠI THÔNG BÁO MỚI (LOẠI BỎ NGƯỜI ĐÃ NỘP)
+        if (serviceObj) {
+          await this.refreshGroupPaymentAnnouncement({
+            serviceId: serviceObj.id,
+            batchId: matchedBatch?.id,
+            groupId: groupObj?.id
+          });
         }
         return;
       }
@@ -1484,13 +1536,14 @@ export class TelegramBotService {
         const fromId = String(ctx.from?.id);
         const fromUsername = (ctx.from?.username || '').toLowerCase().trim();
 
-        const serviceObj = isBatch 
-          ? state.services.find(s => s.id === (state.expenseBatches || []).find(b => b.id === targetId)?.serviceId)
-          : state.services.find(s => s.id === targetId);
-        const groupObj = isBatch
-          ? state.groups.find(g => g.id === (state.expenseBatches || []).find(b => b.id === targetId)?.groupId || g.id === serviceObj?.groupId)
-          : state.groups.find(g => g.id === serviceObj?.groupId);
+        // Tìm Batch (nếu có) và Service liên quan
+        let matchedBatch = (state.expenseBatches || []).find(b => b.id === targetId);
+        if (!matchedBatch) {
+          matchedBatch = (state.expenseBatches || []).find(b => b.serviceId === targetId && b.members.some(m => m.memberId === memberId));
+        }
 
+        const serviceObj = state.services.find(s => s.id === (matchedBatch?.serviceId || targetId));
+        const groupObj = state.groups.find(g => g.id === (matchedBatch?.groupId || serviceObj?.groupId));
         const collector = this.resolveCollector(serviceObj, groupObj, state);
 
         // Phân quyền nếu bấm trong nhóm chung
@@ -1522,45 +1575,49 @@ export class TelegramBotService {
 
         let memberName = '';
         let memberTag = '';
-        let serviceName = '';
+        let serviceName = serviceObj?.name || matchedBatch?.title || '';
         let amount = 0;
 
-        if (isBatch) {
-          const batch = (state.expenseBatches || []).find(b => b.id === targetId);
-          const memberItem = batch?.members.find(m => m.memberId === memberId);
+        const now = new Date();
+        const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const targetMonth = matchedBatch?.month || currentMonth;
 
-          if (batch && memberItem) {
-            memberName = memberItem.name;
-            memberTag = memberItem.telegramUsername || '';
-            serviceName = batch.title;
-            amount = memberItem.amount;
+        const baseMember = (state.members[serviceObj?.id || ''] || []).find(m => m.id === memberId);
+        const batchMember = matchedBatch?.members.find(m => m.memberId === memberId);
 
-            await this.store.update(s => {
-              const b = (s.expenseBatches || []).find(b => b.id === targetId);
-              const m = b?.members.find(m => m.memberId === memberId);
-              if (m) m.status = 'unpaid';
-            });
+        memberName = batchMember?.name || baseMember?.name || 'Thành viên';
+        memberTag = batchMember?.telegramUsername || baseMember?.telegramUsername || '';
+        amount = batchMember?.amount || (serviceObj && serviceObj.mode === 'per_member' && baseMember?.customAmount
+          ? baseMember.customAmount
+          : (serviceObj?.defaultAmountPerMember || Math.round((serviceObj?.totalAmount || 0) / (state.members[serviceObj?.id || '']?.length || 1))));
+
+        await this.store.update(s => {
+          // 1. Cập nhật trạng thái unpaid trong expenseBatches
+          for (const b of (s.expenseBatches || [])) {
+            if (b.id === matchedBatch?.id || (serviceObj && b.serviceId === serviceObj.id && (b.month === targetMonth || b.status === 'active'))) {
+              const bm = b.members.find(m => m.memberId === memberId);
+              if (bm) {
+                bm.status = 'unpaid';
+                bm.paidAmount = 0;
+                bm.paidAt = undefined;
+              }
+              b.status = 'active';
+              b.completedAt = undefined;
+              b.completedNotificationSent = false;
+            }
           }
-        } else {
-          const service = state.services.find(s => s.id === targetId);
-          const member = (state.members[targetId] || []).find(m => m.id === memberId);
-          const now = new Date();
-          const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-          if (service && member) {
-            memberName = member.name;
-            memberTag = member.telegramUsername || '';
-            serviceName = service.name;
-            amount = service.mode === 'per_member' && member.customAmount
-              ? member.customAmount
-              : (service.defaultAmountPerMember || Math.round(service.totalAmount / (state.members[targetId]?.length || 1)));
-
-            await this.store.update(s => {
-              let p = s.monthlyPayments.find(pay => pay.serviceId === targetId && pay.memberId === memberId && pay.month === currentMonth);
-              if (p) p.status = 'unpaid';
-            });
+          // 2. Đồng bộ sang monthlyPayments
+          const targetSvcId = serviceObj?.id || matchedBatch?.serviceId;
+          if (targetSvcId) {
+            let p = s.monthlyPayments.find(pay => pay.serviceId === targetSvcId && pay.memberId === memberId && pay.month === targetMonth);
+            if (p && p.status !== 'paid') {
+              p.status = 'unpaid';
+              p.paidAmount = 0;
+              p.paidAt = undefined;
+            }
           }
-        }
+        });
 
         const rawMemberTag = (memberTag || '').replace(/^@/, '').trim();
         const safeTag = this.formatTag(rawMemberTag, memberName);
@@ -1614,11 +1671,159 @@ export class TelegramBotService {
         try {
           await ctx.answerCallbackQuery({ text: `❌ Đã từ chối xác nhận cho ${memberName}!` });
         } catch (e) {}
+
+        if (serviceObj) {
+          await this.refreshGroupPaymentAnnouncement({
+            serviceId: serviceObj.id,
+            batchId: matchedBatch?.id,
+            groupId: groupObj?.id
+          });
+        }
         return;
       }
 
       await ctx.answerCallbackQuery();
     });
+  }
+
+  /**
+   * Tự động làm mới thông báo đóng tiền trong nhóm Telegram:
+   * 1. Xóa thông báo cũ của đợt thu (batch.messageId)
+   * 2. Lọc ra danh sách thành viên chưa đóng (status !== 'paid')
+   * 3. Nếu còn người chưa đóng: Gửi thông báo tiến độ mới + danh sách nút bấm chỉ còn người chưa nộp, lưu messageId mới vào batch
+   * 4. Nếu tất cả đã nộp đủ (100%): Đánh dấu batch completed + gửi thông báo chúc mừng hoàn tất
+   */
+  public async refreshGroupPaymentAnnouncement(params: {
+    serviceId?: string;
+    batchId?: string;
+    groupId?: string;
+  }): Promise<{ success: boolean; messageId?: number; completed?: boolean; error?: string }> {
+    try {
+      const state = await this.store.read();
+      let matchedBatch: ExpenseBatch | undefined;
+      let serviceObj: Service | undefined;
+      let groupObj: Group | undefined;
+
+      const now = new Date();
+      const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+      if (params.batchId) {
+        matchedBatch = (state.expenseBatches || []).find(b => b.id === params.batchId);
+      }
+
+      if (!matchedBatch && params.serviceId) {
+        // Tìm batch active của serviceId hoặc batch của tháng hiện tại
+        matchedBatch = (state.expenseBatches || []).find(
+          b => b.serviceId === params.serviceId && (b.status === 'active' || b.month === currentMonth)
+        );
+      }
+
+      if (matchedBatch) {
+        serviceObj = state.services.find(s => s.id === matchedBatch!.serviceId);
+        groupObj = state.groups.find(g => g.id === matchedBatch!.groupId || g.id === serviceObj?.groupId);
+      } else if (params.serviceId) {
+        serviceObj = state.services.find(s => s.id === params.serviceId);
+        if (serviceObj) {
+          groupObj = state.groups.find(g => g.id === (params.groupId || serviceObj!.groupId));
+        }
+      }
+
+      if (!groupObj && params.groupId) {
+        groupObj = state.groups.find(g => g.id === params.groupId);
+      }
+
+      if (!groupObj || !groupObj.chatId) {
+        return { success: false, error: 'Group or chatId not found' };
+      }
+
+      // Nếu không có batch cụ thể nào, không cần làm mới thông báo đợt thu
+      if (!matchedBatch) {
+        return { success: true };
+      }
+
+      // 1. Xóa thông báo cũ trong nhóm nếu có messageId
+      if (matchedBatch.messageId) {
+        await this.deleteMessage(groupObj.chatId, matchedBatch.messageId).catch(() => {});
+      }
+
+      // 2. Lọc danh sách thành viên còn chưa nộp
+      const unpaidMembers = (matchedBatch.members || []).filter(m => m.status !== 'paid');
+      const totalCount = (matchedBatch.members || []).length;
+      const paidCount = totalCount - unpaidMembers.length;
+
+      // 3. Nếu còn người chưa nộp -> Gửi lại thông báo cập nhật tiến độ và nút bấm chỉ còn người chưa nộp
+      if (unpaidMembers.length > 0) {
+        const batchTitle = (matchedBatch.title || serviceObj?.name || 'Đợt thu tiền').replace(/[*_`\\]/g, '');
+        let msg = `📢 *[CẬP NHẬT TIẾN ĐỘ THU TIỀN: ${batchTitle.toUpperCase()}]*\n`;
+        if (matchedBatch.note) msg += `📝 Ghi chú: _${matchedBatch.note}_\n`;
+        msg += `👥 Tiến độ: *${paidCount}/${totalCount} người đã nộp* (còn lại *${unpaidMembers.length} người*)\n\n`;
+        msg += `📋 *Danh sách còn chưa nộp:*\n`;
+
+        for (const m of unpaidMembers) {
+          const tag = this.formatTag(m.telegramUsername, m.name);
+          const cleanCode = (m.transferCode || '').trim();
+          const prefix = (serviceObj?.transferPrefix || '').trim();
+          const fullCode = prefix && !cleanCode.toUpperCase().startsWith(prefix.toUpperCase())
+            ? `${prefix} ${cleanCode}`
+            : cleanCode;
+          msg += `• ${tag}: *${m.amount.toLocaleString('vi-VN')}đ* ➔ ND: \`${fullCode}\`\n`;
+        }
+
+        if (serviceObj) {
+          msg += `\n💳 *Tài khoản nhận tiền:*\n`;
+          msg += `• Ngân hàng: *${serviceObj.bankInfo.bankCode}*\n`;
+          msg += `• STK: \`${serviceObj.bankInfo.accountNumber}\`\n`;
+          msg += `• Chủ TK: *${serviceObj.bankInfo.accountName}*\n\n`;
+        }
+
+        msg += `💡 _Hoặc gõ lệnh_ \`/guitien\` _trong nhóm để lấy nhanh mã VietQR riêng_\n`;
+        msg += `👇 *BẤM VÀO TÊN BẠN ĐỂ LẤY MÃ VIETQR (TỰ ĐỘNG XÓA SAU KHI CK):*`;
+
+        const buttons = unpaidMembers.map(m => ({
+          text: `💳 ${m.name} (${m.amount.toLocaleString('vi-VN')}đ)`,
+          callbackData: `pay_batch:${matchedBatch!.id}:${m.memberId}`
+        }));
+
+        const sendResult = await this.sendMessageWithButtons(groupObj.chatId, msg, buttons, groupObj.threadId);
+        if (sendResult.success && sendResult.messageId) {
+          await this.store.update(s => {
+            const b = (s.expenseBatches || []).find(item => item.id === matchedBatch!.id);
+            if (b) {
+              b.messageId = sendResult.messageId;
+            }
+          });
+          return { success: true, messageId: sendResult.messageId, completed: false };
+        }
+        return { success: sendResult.success, error: sendResult.error };
+      }
+
+      // 4. Nếu tất cả đã nộp đủ (100%) -> Đánh dấu completed và gửi thông báo chúc mừng
+      if (totalCount > 0 && unpaidMembers.length === 0) {
+        await this.store.update(s => {
+          const b = (s.expenseBatches || []).find(item => item.id === matchedBatch!.id);
+          if (b) {
+            b.status = 'completed';
+            b.completedAt = new Date().toISOString();
+            b.completedNotificationSent = true;
+          }
+        });
+
+        const celebrationMsg =
+          `🎉 *TẤT CẢ THÀNH VIÊN ĐÃ HOÀN TẤT ĐÓNG TIỀN!* 🎉\n\n` +
+          `📦 Đợt thu: *${matchedBatch.title}*\n` +
+          `👥 Tiến độ: *${totalCount}/${totalCount} thành viên đã đóng đủ*\n` +
+          `💰 Tổng số tiền: *${matchedBatch.totalAmount.toLocaleString('vi-VN')}đ*\n\n` +
+          `❤️ _Cảm ơn tất cả mọi người đã hoàn tất đóng tiền đầy đủ và đúng hạn!_ 🚀`;
+
+        await this.sendMessage(groupObj.chatId, celebrationMsg, groupObj.threadId);
+        return { success: true, completed: true };
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('❌ Lỗi refreshGroupPaymentAnnouncement:', error);
+      return { success: false, error: error?.message || String(error) };
+    }
   }
 
   /**
